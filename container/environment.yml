@@ -1,0 +1,28 @@
+name: CMD-twist
+channels:
+    - bioconda
+    - conda-forge
+    - defaults
+
+dependencies:
+    - bioconda::picard=2.18.26
+    - bioconda::bwa=0.7.17
+    - bioconda::samtools=1.9
+    - bioconda::sambamba=0.6.8
+    - bioconda::gatk4=4.1.0
+    - bioconda::vcflib=1.0.0_rc2
+    - bioconda::bcftools=1.9
+    - bioconda::snpsift=4.3
+    - bioconda::tabix=0.2.6
+    - bioconda::htslib=1.9
+    - bioconda::freebayes=1.2.0
+    - bioconda::manta=1.5.0
+    - bioconda::pindel=0.2.5b9
+    - bioconda::vardict=2018.10.18
+    - bioconda::cnvkit=0.9.5
+    - bioconda::bedtools=2.27.1
+    - bioconda::vcftools=0.1.16
+    - bioconda::perl-vcftools-vcf=0.1.16
+    - bioconda::vt=2015.11.10
+    - bioconda::sentieon=201808.08
+    - bioconda::perl-app-cpanminus==1.7044

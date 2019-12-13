@@ -1,0 +1,10 @@
+*~
+\#*\#
+.nextflow*
+work/
+*.sif
+*.png
+data/
+test_run_*
+test.timeline*
+test.dag*
