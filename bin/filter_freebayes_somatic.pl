@@ -8,6 +8,9 @@ use List::Util qw( max min );
 
 my $vcf = vcf2->new('file'=>$ARGV[0] );
 
+my $T = $ARGV[1];
+my $N = $ARGV[2];
+
 #TODO ADD INFO HEADER STRINGS PROPERLY!
 system("zgrep ^## $ARGV[0]");
 print '##INFO=<ID=SSC,Number=1,Type=Float,Description="Somatic score">'."\n";
@@ -15,6 +18,7 @@ system("zgrep ^#CHROM $ARGV[0]");
 
 my $SSC_THRES = 30; # Somatic score threshold
 my $LOD_THRES = 10; # Likelihood ratio threshold
+my $MIN_VAF_RATIO = 3;
 
 while ( my $v = $vcf->next_var() ) {
 
@@ -24,7 +28,8 @@ while ( my $v = $vcf->next_var() ) {
     my( %likelihood, %gl_idx, %genotype, %altobs, %depth );
     my $status = "PASS";
     for my $gt (@{$v->{GT}}) {
-	my $type = (split /_/, $gt->{_sample_id})[-1];
+        my $type = "T";
+        $type = "N" if $gt->{_sample_id} eq $N;
 
 	# Fail if GT is 0/0 for tumor
 	$status = "FAIL_GT" if $type eq "T" and $gt->{GT} eq "0/0";
@@ -45,6 +50,7 @@ while ( my $v = $vcf->next_var() ) {
 	$likelihood{$type} = \@GL;
 	$gl_idx{$type} = $GL_IDX;
     }
+
 
     my $LOD_NORM  = $likelihood{N}->[$gl_idx{N}] - $likelihood{N}->[$gl_idx{T}];
     my $LOD_TUMOR = $likelihood{T}->[$gl_idx{T}] - $likelihood{T}->[$gl_idx{N}];
@@ -74,7 +80,7 @@ while ( my $v = $vcf->next_var() ) {
     if( $depth{N} > 0 and $depth{T} > 0 ) {
 	my $NVAF = $altobs{N}->[$TALT-1] / $depth{N};
 	my $TVAF = $altobs{T}->[$TALT-1] / $depth{T};
-	if( $NVAF > 0 and ($TVAF/$NVAF < 3) ) {
+	if( $NVAF > 0 and ($TVAF/$NVAF < $MIN_VAF_RATIO) ) {
 	    $status = "FAIL_NVAF";
 	}
     }
