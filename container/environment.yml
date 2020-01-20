@@ -18,7 +18,7 @@ dependencies:
     - bioconda::freebayes=1.2.0
     - bioconda::manta=1.5.0
     - bioconda::pindel=0.2.5b9
-    - bioconda::vardict=2018.10.18
+    - bioconda::vardict-java=1.7.0
     - bioconda::cnvkit=0.9.5
     - bioconda::bedtools=2.27.1
     - bioconda::vcftools=0.1.16
