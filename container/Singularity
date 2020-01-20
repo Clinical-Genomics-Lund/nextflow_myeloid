@@ -4,13 +4,13 @@ From:nfcore/base
 %labels
 	MAINTAINER Björn Hallström <bjorn.hallstrom@skane.se>
 	DESCRIPTION Singularity container for CMD myeloid twist pipeline
-	VERSION 0.0.2
+	VERSION 0.0.3
 
 %environment
 	PATH=/opt/conda/envs/CMD-twist/bin:/opt/sentieon-genomics-201911/bin/:$PATH
 	PICARD_HOME=/opt/conda/envs/CMD-twist/share/picard-2.18.26-0/
 	PERL5LIB=$PERL5LIB:/opt/conda/envs/CMD-twist/lib/site_perl/5.26.2/
-
+	export JAVA_HOME=/opt/conda/envs/CMD-twist
 %files
         environment.yml /
         /data/bnf/scripts/postaln_qc.pl /usr/local/bin
