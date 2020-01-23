@@ -10,7 +10,7 @@ use Data::Dumper;
    
 
 my %opt = ();
-my @supported_callers = ('freebayes', 'mutect2', 'tnscope' );
+my @supported_callers = ('freebayes', 'mutect2', 'tnscope', 'vardict' );
 
 GetOptions( \%opt, 'vcfs=s', 'tumor-id=s', 'normal-id=s', 'fluffify-pindel' );
 
@@ -32,6 +32,9 @@ sub aggregate_vcfs {
     my @agg;
     my %agg;
     my @headers;
+
+    my %filters;
+    
     foreach my $fn ( @vcfs ) {
 
 	my $vcf = vcf2->new('file'=>$fn );
@@ -40,9 +43,18 @@ sub aggregate_vcfs {
 	
 	my $vc = which_variantcaller( $vcf->{meta} );
 
+	
 	while ( my $var = $vcf->next_var() ) {
 	    my $simple_id = $var->{CHROM}."_".$var->{POS}."_".$var->{REF}."_".$var->{ALT};
 
+	    # Collect all filters for each variant
+
+	    if( $var->{FILTER} ) {
+		my @vc_filters = split /;/, $var->{FILTER};
+		$filters{$simple_id}->{$_} = 1 foreach @vc_filters;
+	    }
+	    
+	    
 	    if( $agg{$simple_id} ) {
 		$agg{$simple_id}->{INFO}->{variant_callers} .= "|$vc";
 	    }
@@ -53,6 +65,11 @@ sub aggregate_vcfs {
 	    }
  	}
     }
+
+    foreach my $id (keys %agg) {
+	$agg{$id}->{FILTER} = summarize_filters( keys %{$filters{$id}} )
+    }
+    
     return( \%agg, \@headers );
 }
 
@@ -60,14 +77,32 @@ sub aggregate_headers {
     my $headers = shift;
 
     my @agg_header = @{$headers->[0]};
+   
+}
+
+sub summarize_filters {
+    my @filters = @_;
+
+    my @non_pass;
+    my $pass = 1;
+    foreach (@filters ) {
+	push( @non_pass, $_ ) if $_ ne "PASS" and $_ ne ".";
+	$pass = 0 if $_ =~ /FAIL|WARN/;
+    }
+    unshift @non_pass, "PASS" if $pass;
     
-    
+    if( @non_pass ) {
+	return join ";", @non_pass;
+    }
+    else {
+	return "PASS";
+    }	
 }
 
 sub fix_gt {
     my( $var, $vc ) = @_;
 
-    if( $vc eq "mutect2" or $vc eq "tnscope" ) {
+    if( $vc eq "mutect2" or $vc eq "tnscope" or $vc eq "vardict" ) {
 	for my $gt ( @{$var->{GT}} ) {
 	    my ($ref_dp, $alt_dp) = (0,0);
 	    if( $gt->{AD} ) {
@@ -248,6 +283,9 @@ sub which_variantcaller{
     }
     if( $meta->{'SentieonCommandLine.TNscope'} ) {
 	return "tnscope";
+    }
+    if( $meta->{INFO}->{MSILEN} ) { # FIXME: Terrible way of detecting vardict VCFs...
+	return "vardict";
     }
 
     return "unknown";
