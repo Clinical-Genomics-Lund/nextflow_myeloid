@@ -7,21 +7,31 @@ use vcf2;
 use strict;
 use Data::Dumper;
 
-   
+# TODO:
+#  * Order sample names in header according to sample-order
+#  * Check that all sample-order sample names exist
+#  * Check order of sample names if no sample-order given
+#  * Remove INFO-fields and old GT-data from both header and variants
+#  * Add pindel support
 
-my %opt = ();
+
 my @supported_callers = ('freebayes', 'mutect2', 'tnscope', 'vardict' );
 
-GetOptions( \%opt, 'vcfs=s', 'tumor-id=s', 'normal-id=s', 'fluffify-pindel' );
-
+# Get command line options
+my %opt = ();
+GetOptions( \%opt, 'vcfs=s', 'tumor-id=s', 'normal-id=s', 'fluffify-pindel', 'sample-order=s' );
 my @vcfs = check_options( \%opt );
 
+my @sample_order;
+@sample_order = split /,/, $opt{'sample-order'} if $opt{'sample-order'};
+
+# Aggregate the vcfs
 my( $agg_vars, $agg_header ) = aggregate_vcfs( @vcfs );
 
+# Output final vcf
 system("zgrep ^# $vcfs[0]");
 foreach my $vid (keys %$agg_vars ) {
-
-    vcfstr($agg_vars->{$vid});
+    vcfstr($agg_vars->{$vid}, \@sample_order);
 }
 
 
@@ -48,7 +58,6 @@ sub aggregate_vcfs {
 	    my $simple_id = $var->{CHROM}."_".$var->{POS}."_".$var->{REF}."_".$var->{ALT};
 
 	    # Collect all filters for each variant
-
 	    if( $var->{FILTER} ) {
 		my @vc_filters = split /;/, $var->{FILTER};
 		$filters{$simple_id}->{$_} = 1 foreach @vc_filters;
@@ -79,6 +88,7 @@ sub aggregate_headers {
     my @agg_header = @{$headers->[0]};
    
 }
+
 
 sub summarize_filters {
     my @filters = @_;
@@ -227,7 +237,9 @@ sub help_text {
     print "\n\$ aggregate_vcf.pl --vcfs COMMA_SEP_LIST_OF_VCFS [--fluffify-pindel]\n\n";
     print "   --vcfs        Comma separated list of VCF files to aggregate, in priority order\n";
     print "   Supported callers: ". join(", ", @supported_callers)."\n\n";;
-	
+    
+    print "   --sample-order    Comma separated list of order of samples names in output VCF.\n";
+    print "                     If not given, all input vcfs must have same order.\n\n";
     print "   --fluffify-pindel Modify pindel REF/ALT fields to be less than 1000 bp (comply with Manta).\n";
     print "\n";
     exit(0);
@@ -308,7 +320,7 @@ sub add_gt {
 }
 
 sub vcfstr {
-    my $v = shift;
+    my( $v, $sample_order ) = @_;
 
     my @all_info;
     print $v->{CHROM}."\t".$v->{POS}."\t".$v->{ID}."\t".$v->{REF}."\t".$v->{ALT}."\t".$v->{QUAL}."\t".$v->{FILTER}."\t";
@@ -322,8 +334,18 @@ sub vcfstr {
     # Print FORMAT field
     print join(":", @{$v->{FORMAT}})."\t";
 
+    
+    my %order;
+    my $i=0;
+    if( @$sample_order > 0 ) {
+	$order{$_} = $i++ foreach @{$sample_order};
+    }
+    else {
+	$order{$_->{_sample_id}} = $i++ foreach @{$v->{GT}};
+    }
+
     # Print GT fields for all samples
-    for my $gt (@{$v->{GT}}) {
+    for my $gt ( sort {$order{$a->{_sample_id}} <=> $order{$b->{_sample_id}}} @{$v->{GT}}) {
 	my @all_gt;
 	for my $key ( @{$v->{FORMAT}} ) {
 	    push @all_gt, ( defined $gt->{$key} ? $gt->{$key} : "");
