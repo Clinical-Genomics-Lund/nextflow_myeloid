@@ -12,6 +12,7 @@ my $T = $ARGV[1];
 my $N = $ARGV[2];
 
 my $MIN_VAF_RATIO = 3;
+my $MIN_VAF_HOMOPOLYMER_RATIO = 5;
 
 #TODO ADD INFO HEADER STRINGS PROPERLY!
 system("zgrep ^## $ARGV[0]");
@@ -39,6 +40,14 @@ while ( my $v = $vcf->next_var() ) {
 	$strand_bias{$type} = $gt->{SBF};
     }
 
+    # Fail long INDELs as they tend to be false positives in VarDict.
+    if( length($v->{REF}) - length($v->{ALT}) > 300 ) {
+	push @status, "FAIL_LONGDEL";
+    }
+    elsif( length($v->{ALT}) - length($v->{REF}) > 300 ) {
+	push @status, "FAIL_LONGINS";
+    }
+    
     # Fail if difference between tumor's and normal's VAF is < 3x.
     if( $vaf{T} > 0 ) {
 	if( $vaf{N} > 0 and ($vaf{T} / $vaf{N} < $MIN_VAF_RATIO) ) {
@@ -56,9 +65,19 @@ while ( my $v = $vcf->next_var() ) {
 	if( $strand_bias{T} < 0.05 ) {
 	    push @status, "WARN_STRANDBIAS";
 	}
-	if( $msilen == 1 and $msi > 5 ) {
-	    push @status, "WARN_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
+
+        # If in a homopolymer
+	if( $msilen == 1 and $msi > 10 ) {
+	    if( !$is_indel or !$vaf{N} or $vaf{T} / $vaf{N} >= $MIN_VAF_HOMOPOLYMER_RATIO ) {
+		push @status, "WARN_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
+	    }
+	    else {
+		push @status, "FAIL_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
+	    }
 	}
+
+	
+	
     }
     else {
 	push @status, "FAIL_NO_TVAR";
