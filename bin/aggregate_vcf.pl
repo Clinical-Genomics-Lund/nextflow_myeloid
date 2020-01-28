@@ -57,6 +57,9 @@ sub aggregate_vcfs {
 	while ( my $var = $vcf->next_var() ) {
 	    my $simple_id = $var->{CHROM}."_".$var->{POS}."_".$var->{REF}."_".$var->{ALT};
 
+	    $var->{INFO} = {};
+	    $var->{INFO_order} = [];
+	    
 	    # Collect all filters for each variant
 	    if( $var->{FILTER} ) {
 		my @vc_filters = split /;/, $var->{FILTER};
