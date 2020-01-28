@@ -40,6 +40,7 @@ process bwa_umi {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
 	cpus 50
 	memory '64 GB'
+	time '2h'
 
 	input:
 		set group, id, type, file(r1), file(r2) from fastq_umi
@@ -77,6 +78,7 @@ process bwa_umi {
 process bwa_align {
 	cpus 50
 	memory '64 GB'
+	time '2h'
 	    
 	input: 
 		set group, id, type, file(r1), file(r2) from fastq_noumi
@@ -111,6 +113,7 @@ process markdup {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
 	cpus 16
 	memory '64 GB'
+	time '1h'
     
 	input:
 		set group, id, type, file(bam), file(bai) from bam_markdup
@@ -128,8 +131,9 @@ process markdup {
 
 
 process bqsr {
-	cpus 16	
+	cpus 8
 	memory '16 GB'
+	time '1h'
 
 	input:
 		set group, id, type, file(bam), file(bai) from bam_bqsr.mix(bam_umi_bqsr)
@@ -144,9 +148,10 @@ process bqsr {
 
 
 process sentieon_qc {
-	cpus 40
-	memory '64 GB'
+	cpus 20
+	memory '32 GB'
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
+	time '1h'
 
 	input:
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc.mix(bam_umi_qc)
@@ -178,7 +183,8 @@ process sentieon_qc {
 
 process freebayes {
 	cpus 1
-    
+	time '20m'
+	
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_freebayes.groupTuple()
 		each file(bed) from beds_freebayes
@@ -213,6 +219,7 @@ process freebayes {
 
 process vardict {
 	cpus 1
+	time '20m'
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_vardict.groupTuple()
@@ -248,6 +255,7 @@ process vardict {
 
 process pindel {
 	cpus 16
+	time '30 m'
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr), file(ins_size) from bam_pindel.join(insertsize_pindel, by:[0,1,2]).groupTuple().view()
@@ -285,7 +293,8 @@ process pindel {
 
 process tnscope {
     cpus 6
-    
+	time '1h'    
+
     input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
 		each file(bed) from beds_tnscope
@@ -335,7 +344,8 @@ vcfs_to_concat = vcfparts_freebayes.mix(vcfparts_vardict).mix(vcfparts_tnscope)
 
 process concatenate_vcfs {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-    
+	time '20m'    
+
 	input:
 		set vc, group, file(vcfs) from vcfs_to_concat
 
@@ -354,6 +364,7 @@ process concatenate_vcfs {
 
 process aggregate_vcfs {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	time '20m'
 
 	input:
 		set group, vc, file(vcfs) from concatenated_vcfs.groupTuple()
@@ -381,12 +392,13 @@ process annotate_vep {
     container = '/fs1/resources/containers/container_VEP.sif'
     publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
     cpus 16
+	time '1h'
     
     input:
-	set group, file(vcf) from vcf_vep
+		set group, file(vcf) from vcf_vep
 
     output:
-	file("${group}.vep.vcf") into vcf_final
+		file("${group}.vep.vcf") into vcf_final
 
     """
     vep -i ${vcf} -o ${group}.vep.vcf \\
