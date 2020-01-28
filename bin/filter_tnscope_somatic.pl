@@ -77,7 +77,11 @@ while ( my $v = $vcf->next_var() ) {
 	}
 	if( !$is_indel and $v->{INFO}->{SOR} > 2.5) {
 	    push @status, ( $v->{INFO}->{SOR} > 4 ? "FAIL_STRANDBIAS" : "WARN_STRANDBIAS" );
-	}	
+	}
+
+	if( $v->{INFO}->{PV2} > 0.05 ) {
+	    push @status, "FAIL_PVALUE";
+	}
     }
     else {
 	push @status, "FAIL_NO_TVAR";
