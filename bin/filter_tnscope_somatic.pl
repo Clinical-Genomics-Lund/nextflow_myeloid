@@ -25,7 +25,7 @@ system("zgrep ^#CHROM $ARGV[0]");
 while ( my $v = $vcf->next_var() ) {
 
     my @status;
-    my (%vaf, %dp, %strand_bias, %msi, %msilen);
+    my (%vaf, %dp);
 
     my $is_indel = 0;
     $is_indel = 1 if length($v->{REF}) != length($v->{ALT});
@@ -70,6 +70,14 @@ while ( my $v = $vcf->next_var() ) {
 		push @status, "FAIL_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
 	    }
 	}
+
+	# Warn/fail on high strand bias (SOR)
+	if( $is_indel and $v->{INFO}->{SOR} > 4) {
+	    push @status, ( $v->{INFO}->{SOR} > 10 ? "FAIL_STRANDBIAS" : "WARN_STRANDBIAS" );
+	}
+	if( !$is_indel and $v->{INFO}->{SOR} > 2.5) {
+	    push @status, ( $v->{INFO}->{SOR} > 4 ? "FAIL_STRANDBIAS" : "WARN_STRANDBIAS" );
+	}	
     }
     else {
 	push @status, "FAIL_NO_TVAR";
