@@ -133,7 +133,7 @@ def main():
 
     vcf_handle.seek(0)
     # Run samtools mpileup
-    run( ["samtools", "mpileup", bam,
+    run( ["/data/bnf/sw/samtools/1.10/samtools", "mpileup", bam,
           "-f", ref,
           "-l", "positions.tmp",
           "--output-QNAME",
@@ -156,9 +156,11 @@ def main():
         vcf_line = vcf_line.rstrip()
         
         if vcf_line.startswith("##"):
+            print(vcf_line)
             continue
 
         elif vcf_line.startswith("#"):
+            print(vcf_line)
             header = vcf_line.split("\t")
             sample_idx = header.index(sample_id)
 
