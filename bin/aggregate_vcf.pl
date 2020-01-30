@@ -100,7 +100,7 @@ sub summarize_filters {
     my $pass = 1;
     foreach (@filters ) {
 	push( @non_pass, $_ ) if $_ ne "PASS" and $_ ne ".";
-	$pass = 0 if $_ =~ /FAIL|WARN/;
+	$pass = 0 if $_ =~ /FAIL/;
     }
     unshift @non_pass, "PASS" if $pass;
     
