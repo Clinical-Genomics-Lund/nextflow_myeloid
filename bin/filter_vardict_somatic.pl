@@ -41,10 +41,10 @@ while ( my $v = $vcf->next_var() ) {
     }
 
     # Fail long INDELs as they tend to be false positives in VarDict.
-    if( length($v->{REF}) - length($v->{ALT}) > 300 or $v->{ALT} =~ /^<DEL>$/ ) {
+    if( length($v->{REF}) - length($v->{ALT}) > 250 or $v->{ALT} =~ /^<DEL>$/ ) {
 	push @status, "FAIL_LONGDEL";
     }
-    elsif( length($v->{ALT}) - length($v->{REF}) > 300 or $v->{ALT} =~ /^<(DUP|INS)>$/ ) {
+    elsif( length($v->{ALT}) - length($v->{REF}) > 250 or $v->{ALT} =~ /^<(DUP|INS)>$/ ) {
 	push @status, "FAIL_LONGINS";
     }
     
