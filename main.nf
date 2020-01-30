@@ -46,7 +46,7 @@ process bwa_umi {
 		set group, id, type, file(r1), file(r2) from fastq_umi
 
 	output:
-		set group, id, type, file("${id}.${type}.bwa.umi.sort.bam"), file("${id}.${type}.bwa.umi.sort.bam.bai") into bam_umi_bqsr
+		set group, id, type, file("${id}.${type}.bwa.umi.sort.bam"), file("${id}.${type}.bwa.umi.sort.bam.bai") into bam_umi_bqsr, bam_umi_confirm
 		set group, id, type, file("${id}.${type}.bwa.umi.sort.bam"), file("${id}.${type}.bwa.umi.sort.bam.bai"), file("dedup_metrics.txt") into bam_umi_qc
 
 	when:
@@ -160,6 +160,10 @@ process sentieon_qc {
 		set group, id, type, file("${id}_is_metrics.txt") into insertsize_pindel
 		set id, file("${id}_${type}.QC")
 
+    script:
+	if( mode == "paired" ) {
+		tumor_idx = type.findIndexOf{ it == 'tumor' }
+		normal_idx = type.findIndexOf{ it == 'normal' }
 	"""
 	sentieon driver \\
 		--interval $params.regions_bed -r $genome_file -t ${task.cpus} -i ${bam} \\
@@ -302,10 +306,6 @@ process tnscope {
     output:
 		set val("tnscope"), group, file("tnscope_${bed}.vcf") into vcfparts_tnscope
 
-    script:
-	if( mode == "paired" ) {
-		tumor_idx = type.findIndexOf{ it == 'tumor' }
-		normal_idx = type.findIndexOf{ it == 'normal' }
 
 		"""
 		sentieon driver -t ${task.cpus} \\
@@ -387,7 +387,6 @@ process aggregate_vcfs {
 }
 
 
-
 process annotate_vep {
     container = '/fs1/resources/containers/container_VEP.sif'
     publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
@@ -398,7 +397,7 @@ process annotate_vep {
 		set group, file(vcf) from vcf_vep
 
     output:
-		file("${group}.vep.vcf") into vcf_final
+		set group, file("${group}.vep.vcf") into vcf_umi
 
     """
     vep -i ${vcf} -o ${group}.vep.vcf \\
@@ -413,4 +412,39 @@ process annotate_vep {
     """
 }
 
+
+process umi_confirm {
+	publishDir "${OUTDIR}/vcf, mode: 'copy', overwrite: true
+	cpus 1
+	time '1h'
+
+	input:
+		set group, file(vcf), id, type, file(bam), file(bai) from vcf_umi.join(bam_umi_confirm).view().groupTuple().view()
+
+	output:
+		file("${group}.vep.umi.vcf")
+
+	when:
+		params.umi
+
+	script:
+		if( mode == "paired" ) {
+
+			tumor_idx = type.findIndexOf{ it == 'tumor' }
+			normal_idx = type.findIndexOf{ it == 'normal' }
+
+			"""
+			source activate samtools
+			UMIconfirm_vcf.py ${bam[tumor_idx]} ${vcf[tumor_idx]} $genome_file ${id[tumor_idx]} > umitmp.vcf
+			UMIconfirm_vcf.py ${normal[tumor_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.umi.vcf
+			"""
+		}
+		else if( mode == "unpaired" ) {
+			"""
+			source activate samtools
+			UMIconfirm_vcf.py ${bam[tumor_idx]} ${vcf[tumor_idx]} $genome_file ${id[tumor_idx]} > ${group}.vep.umi.vcf
+			"""
+		}
+
+}
 
