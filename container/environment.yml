@@ -10,6 +10,7 @@ dependencies:
     - bioconda::sambamba=0.7.1
     - bioconda::vcflib=1.0.0_rc2
     - bioconda::snpsift=4.3
+    - bioconda::samtools=1.9
     - bioconda::tabix=0.2.6
     - bioconda::freebayes=1.3.2
     - bioconda::pindel=0.2.5b9
