@@ -67,7 +67,7 @@ while ( my $v = $vcf->next_var() ) {
 	}
 
         # If in a homopolymer
-	if( $msilen == 1 and $msi > 10 ) {
+	if( $msilen <= 2 and $msi > 10 ) {
 	    if( !$is_indel or !$vaf{N} or $vaf{T} / $vaf{N} >= $MIN_VAF_HOMOPOLYMER_RATIO ) {
 		push @status, "WARN_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
 	    }
