@@ -73,7 +73,7 @@ while ( my $v = $vcf->next_var() ) {
     }
     else {
 	$TALT = $genotype{T}->[0];
-	$status = "FAIL_NOVAR" if $TALT eq "0";
+	$status = "WARN_NOVAR" if $TALT eq "0";
     }
 
     # Fail if difference between tumor's and normal's VAF is < 3x.
