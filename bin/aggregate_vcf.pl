@@ -115,7 +115,7 @@ sub summarize_filters {
 sub fix_gt {
     my( $var, $vc ) = @_;
 
-    $var->{FORMAT} = []
+    $var->{FORMAT} = [];
     
     if( $vc =~ /^(mutect2|tnscope|vardict|pindel)$/ ) {
 	for my $gt ( @{$var->{GT}} ) {
