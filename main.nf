@@ -33,7 +33,7 @@ Channel
 
 process bwa_umi {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
-	cpus $params.cpu_all
+	cpus params.cpu_all
 	memory '64 GB'
 	time '2h'
 
@@ -69,7 +69,7 @@ process bwa_umi {
 
 
 process bwa_align {
-	cpus $params.cpu_all
+	cpus params.cpu_all
 	memory '64 GB'
 	time '2h'
 	    
@@ -105,7 +105,7 @@ process bwa_align {
 
 process markdup {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
-	cpus $params.cpu_many
+	cpus params.cpu_many
 	memory '64 GB'
 	time '1h'
     
@@ -125,7 +125,7 @@ process markdup {
 
 
 process bqsr {
-	cpus $params.cpu_some
+	cpus params.cpu_some
 	memory '16 GB'
 	time '1h'
 
@@ -142,7 +142,7 @@ process bqsr {
 
 
 process sentieon_qc {
-	cpus $params.cpu_many
+	cpus params.cpu_many
 	memory '32 GB'
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
 	time '1h'
@@ -242,7 +242,7 @@ process vardict {
 
 
 process tnscope {
-	cpus $params.cpu_some
+	cpus params.cpu_some
 	time '1h'    
 
 	input:
@@ -288,7 +288,7 @@ process tnscope {
 
 
 process pindel {
-	cpus $params_cpu_some
+	cpus params.cpu_some
 	time '30 m'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 
@@ -403,7 +403,7 @@ process aggregate_vcfs {
 process annotate_vep {
 	container = '/fs1/resources/containers/container_VEP.sif'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-	cpus $params.cpu_many
+	cpus params.cpu_many
 	time '1h'
     
 	input:
