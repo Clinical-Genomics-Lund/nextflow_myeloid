@@ -36,6 +36,7 @@ if(params.pindel) {
       .set { bed_pindel }
 }
 
+
 process bwa_umi {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
 	cpus 50
@@ -70,9 +71,7 @@ process bwa_umi {
 
 	touch dedup_metrics.txt
 	"""
-
 }
-
 
 
 process bwa_align {
@@ -109,6 +108,7 @@ process bwa_align {
 		}
 }
 
+
 process markdup {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
 	cpus 16
@@ -139,7 +139,7 @@ process bqsr {
 		set group, id, type, file(bam), file(bai) from bam_bqsr.mix(bam_umi_bqsr)
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_pindel
+		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_pindel, bam_cnvkit
 
 	"""
 	sentieon driver -t ${task.cpus} -r $genome_file -i $bam --algo QualCal ${id}.bqsr.table
@@ -160,10 +160,6 @@ process sentieon_qc {
 		set group, id, type, file("${id}_is_metrics.txt") into insertsize_pindel
 		set id, file("${id}_${type}.QC")
 
-    script:
-	if( mode == "paired" ) {
-		tumor_idx = type.findIndexOf{ it == 'tumor' }
-		normal_idx = type.findIndexOf{ it == 'normal' }
 	"""
 	sentieon driver \\
 		--interval $params.regions_bed -r $genome_file -t ${task.cpus} -i ${bam} \\
@@ -171,7 +167,6 @@ process sentieon_qc {
 		--algo GCBias --summary gc_summary.txt gc_metrics.txt --algo AlignmentStat aln_metrics.txt \\
 		--algo InsertSizeMetricAlgo is_metrics.txt \\
 		--algo CoverageMetrics --cov_thresh 1 --cov_thresh 10 --cov_thresh 30 --cov_thresh 100 --cov_thresh 250 --cov_thresh 500 cov_metrics.txt
-
 	sentieon driver \\
 		-r $genome_file -t ${task.cpus} -i ${bam} \\
 		--algo HsMetricAlgo --targets_list $params.interval_list --baits_list $params.interval_list hs_metrics.txt
@@ -180,9 +175,7 @@ process sentieon_qc {
 
 	qc_sentieon.pl ${id}_${type} panel > ${id}_${type}.QC
 	"""
-
 }
-
 
 
 process freebayes {
@@ -217,8 +210,6 @@ process freebayes {
 			"""
 		}
 }
-
-
 
 
 process vardict {
@@ -256,16 +247,61 @@ process vardict {
 }
 
 
+process tnscope {
+    cpus 6
+	time '1h'    
+
+    input:
+		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
+		each file(bed) from beds_tnscope
+
+    output:
+		set val("tnscope"), group, file("tnscope_${bed}.vcf") into vcfparts_tnscope
+
+
+	script:
+		tumor_idx = type.findIndexOf{ it == 'tumor' }
+		normal_idx = type.findIndexOf{ it == 'normal' }
+
+		if( mode == 'paired' ) {
+			"""
+			sentieon driver -t ${task.cpus} \\
+				-r $genome_file \\
+				-i ${bams[tumor_idx]} -q ${bqsr[tumor_idx]} \\
+				-i ${bams[normal_idx]} -q ${bqsr[normal_idx]} \\
+				--interval $bed --algo TNscope \\
+				--tumor_sample ${id[tumor_idx]} --normal_sample ${id[normal_idx]} \\
+				--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
+				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.0005 \\
+				tnscope_${bed}.vcf.raw
+
+			filter_tnscope_somatic.pl tnscope_${bed}.vcf.raw ${id[tumor_idx]} ${id[normal_idx]} > tnscope_${bed}.vcf
+
+			"""
+		}
+		else {
+			"""
+			sentieon driver -t ${task.cpus} -r $genome_file \\
+				-i ${bams} -q ${bqsr} \\
+				--interval $bed --algo TNscope \\
+				--tumor_sample ${id} \\
+				--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
+				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.00005 \\
+				tnscope_${bed}.vcf
+			""" 
+		}
+}
+
 
 process pindel {
 	cpus 16
 	time '30 m'
 
 	input:
-		set group, id, type, file(bams), file(bais), file(bqsr), file(ins_size) from bam_pindel.join(insertsize_pindel, by:[0,1,2]).groupTuple().view()
+		set group, id, type, file(bams), file(bais), file(bqsr), file(ins_size) from bam_pindel.join(insertsize_pindel, by:[0,1,2]).groupTuple()
 
 	output:
-		set val("pindel"), group, file("${group}_pindel.vcf") into vcf_pindel
+		set group, val("pindel"), file("${group}_pindel.vcf") into vcf_pindel
 
 	script:
 		if( mode == "paired" ) {
@@ -295,44 +331,25 @@ process pindel {
 }
 
 
-process tnscope {
-    cpus 6
-	time '1h'    
+process cnvkit {
+	cpus 1
+	time '1h'
+	
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_tnscope
+		set gr, vc, file(vcf) from vcf_cnvkit.groupTuple()
+		
+	output:
+		set file("${group}.${id}.cnvkit.png")
 
-    input:
-		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
-		each file(bed) from beds_tnscope
-
-    output:
-		set val("tnscope"), group, file("tnscope_${bed}.vcf") into vcfparts_tnscope
-
-
-		"""
-		sentieon driver -t ${task.cpus} \\
-			-r $genome_file \\
-			-i ${bams[tumor_idx]} -q ${bqsr[tumor_idx]} \\
-			-i ${bams[normal_idx]} -q ${bqsr[normal_idx]} \\
-			--interval $bed --algo TNscope \\
-			--tumor_sample ${id[tumor_idx]} --normal_sample ${id[normal_idx]} \\
-			--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
-			--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.0005 \\
-			tnscope_${bed}.vcf.raw
-
-		filter_tnscope_somatic.pl tnscope_${bed}.vcf.raw ${id[tumor_idx]} ${id[normal_idx]} > tnscope_${bed}.vcf
+	script:
+		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
 
 		"""
-	}
-	else {
+		cnvkit.py batch $bams -r $params.cnvkit_reference -d results/
+		cnvkit.py scatter -s results/*.cn{s,r} -o ${group}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
 		"""
-		sentieon driver -t ${task.cpus} -r $genome_file \\
-			-i ${bams} -q ${bqsr} \\
-			--interval $bed --algo TNscope \\
-			--tumor_sample ${id} \\
-			--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
-			--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.00005 \\
-			tnscope_${bed}.vcf
-		""" 
-	}
+
 }
 
 
@@ -350,7 +367,7 @@ process concatenate_vcfs {
 		set vc, group, file(vcfs) from vcfs_to_concat
 
 	output:
-		set group, vc, file("${group}_${vc}.vcf.gz") into concatenated_vcfs
+		set group, vc, file("${group}_${vc}.vcf.gz") into concatenated_vcfs, vcf_cnvkit
 
 	"""
 	vcf-concat $vcfs | vcf-sort -c | gzip -c > ${vc}.concat.vcf.gz
@@ -360,14 +377,12 @@ process concatenate_vcfs {
 }
 
 
-
-
 process aggregate_vcfs {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'
 
 	input:
-		set group, vc, file(vcfs) from concatenated_vcfs.groupTuple()
+		set group, vc, file(vcfs) from concatenated_vcfs.mix(pindel_vcf).groupTuple()
 		set g, id, type from meta_aggregate.groupTuple()
 
 	output:
@@ -414,15 +429,17 @@ process annotate_vep {
 
 
 process umi_confirm {
-	publishDir "${OUTDIR}/vcf, mode: 'copy', overwrite: true
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 1
 	time '1h'
 
 	input:
-		set group, file(vcf), id, type, file(bam), file(bai) from vcf_umi.join(bam_umi_confirm).view().groupTuple().view()
+		set group, file(vcf) from vcf_umi
+		set g, id, type, file(bam), file(bai) from bam_umi_confirm.groupTuple()
 
 	output:
 		file("${group}.vep.umi.vcf")
+
 
 	when:
 		params.umi
@@ -435,16 +452,14 @@ process umi_confirm {
 
 			"""
 			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} ${vcf[tumor_idx]} $genome_file ${id[tumor_idx]} > umitmp.vcf
-			UMIconfirm_vcf.py ${normal[tumor_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.umi.vcf
+			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > umitmp.vcf
+			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.umi.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
 			"""
 			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} ${vcf[tumor_idx]} $genome_file ${id[tumor_idx]} > ${group}.vep.umi.vcf
+			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.vep.umi.vcf
 			"""
 		}
-
 }
-
