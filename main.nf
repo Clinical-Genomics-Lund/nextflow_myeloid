@@ -8,6 +8,8 @@ csv = file(params.csv)
 mode = csv.countLines() > 2 ? "paired" : "unpaired"
 println(mode)
 
+
+
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type, file(row.read1), file(row.read2)) }
@@ -31,7 +33,7 @@ Channel
 
 process bwa_umi {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
-	cpus 50
+	cpus $params.cpu_all
 	memory '64 GB'
 	time '2h'
 
@@ -67,7 +69,7 @@ process bwa_umi {
 
 
 process bwa_align {
-	cpus 50
+	cpus $params.cpu_all
 	memory '64 GB'
 	time '2h'
 	    
@@ -103,7 +105,7 @@ process bwa_align {
 
 process markdup {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
-	cpus 16
+	cpus $params.cpu_many
 	memory '64 GB'
 	time '1h'
     
@@ -123,7 +125,7 @@ process markdup {
 
 
 process bqsr {
-	cpus 8
+	cpus $params.cpu_some
 	memory '16 GB'
 	time '1h'
 
@@ -140,7 +142,7 @@ process bqsr {
 
 
 process sentieon_qc {
-	cpus 20
+	cpus $params.cpu_many
 	memory '32 GB'
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
 	time '1h'
@@ -240,14 +242,14 @@ process vardict {
 
 
 process tnscope {
-    cpus 6
+	cpus $params.cpu_some
 	time '1h'    
 
-    input:
+	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
 		each file(bed) from beds_tnscope
 
-    output:
+	output:
 		set val("tnscope"), group, file("tnscope_${bed}.vcf") into vcfparts_tnscope
 
 
@@ -286,7 +288,7 @@ process tnscope {
 
 
 process pindel {
-	cpus 16
+	cpus $params_cpu_some
 	time '30 m'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 
@@ -331,6 +333,7 @@ vcfparts_vardict   = vcfparts_vardict.groupTuple(by:[0,1])
 vcfs_to_concat = vcfparts_freebayes.mix(vcfparts_vardict).mix(vcfparts_tnscope)
 
 process concatenate_vcfs {
+	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'    
 
@@ -372,6 +375,7 @@ process cnvkit {
 
 
 process aggregate_vcfs {
+	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'
 
@@ -397,28 +401,28 @@ process aggregate_vcfs {
 
 
 process annotate_vep {
-    container = '/fs1/resources/containers/container_VEP.sif'
-    publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-    cpus 16
+	container = '/fs1/resources/containers/container_VEP.sif'
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus $params.cpu_many
 	time '1h'
     
-    input:
+	input:
 		set group, file(vcf) from vcf_vep
 
-    output:
+	output:
 		set group, file("${group}.vep.vcf") into vcf_umi
 
-    """
-    vep -i ${vcf} -o ${group}.vep.vcf \\
-    --offline --merged --everything --vcf --no_stats \\
-    --fork ${task.cpus} \\
-    --force_overwrite \\
-    --plugin CADD $params.CADD --plugin LoFtool \\
-    --fasta $params.VEP_FASTA \\
-    --dir_cache $params.VEP_CACHE --dir_plugins $params.VEP_CACHE/Plugins \\
-    --distance 200 \\
-    -cache -custom $params.GNOMAD \\
-    """
+	"""
+	vep -i ${vcf} -o ${group}.vep.vcf \\
+	--offline --merged --everything --vcf --no_stats \\
+	--fork ${task.cpus} \\
+	--force_overwrite \\
+	--plugin CADD $params.CADD --plugin LoFtool \\
+	--fasta $params.VEP_FASTA \\
+	--dir_cache $params.VEP_CACHE --dir_plugins $params.VEP_CACHE/Plugins \\
+	--distance 200 \\
+	-cache -custom $params.GNOMAD \\
+	"""
 }
 
 
