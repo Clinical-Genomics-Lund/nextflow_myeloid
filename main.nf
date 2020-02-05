@@ -296,6 +296,7 @@ process tnscope {
 process pindel {
 	cpus 16
 	time '30 m'
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr), file(ins_size) from bam_pindel.join(insertsize_pindel, by:[0,1,2]).groupTuple()
@@ -334,6 +335,7 @@ process pindel {
 process cnvkit {
 	cpus 1
 	time '1h'
+	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
 	
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_tnscope
