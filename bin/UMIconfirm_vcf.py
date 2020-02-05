@@ -133,7 +133,7 @@ def main():
 
     vcf_handle.seek(0)
     # Run samtools mpileup
-    run( ["/data/bnf/sw/samtools/1.10/samtools", "mpileup", bam,
+    run( ["samtools", "mpileup", bam,
           "-f", ref,
           "-l", "positions.tmp",
           "--output-QNAME",
