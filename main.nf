@@ -28,14 +28,6 @@ Channel
     .into { beds_mutect; beds_freebayes; beds_tnscope; beds_vardict }
 
 
-// Pindel bed file
-if(params.pindel) {
-  Channel
-      .fromPath("${params.pindelbed}")
-      .ifEmpty { exit 1, "Pindel regions bed file not found: ${params.pindelbed}" }
-      .set { bed_pindel }
-}
-
 
 process bwa_umi {
 	publishDir "${OUTDIR}/bam", mode: 'copy', overwrite: true
@@ -332,29 +324,6 @@ process pindel {
 }
 
 
-process cnvkit {
-	cpus 1
-	time '1h'
-	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
-	
-	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_tnscope
-		set gr, vc, file(vcf) from vcf_cnvkit.groupTuple()
-		
-	output:
-		set file("${group}.${id}.cnvkit.png")
-
-	script:
-		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
-
-		"""
-		cnvkit.py batch $bams -r $params.cnvkit_reference -d results/
-		cnvkit.py scatter -s results/*.cn{s,r} -o ${group}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
-		"""
-
-}
-
-
 // Prepare vcf parts for concatenation
 vcfparts_freebayes = vcfparts_freebayes.groupTuple(by:[0,1])
 vcfparts_tnscope   = vcfparts_tnscope.groupTuple(by:[0,1])
@@ -379,12 +348,35 @@ process concatenate_vcfs {
 }
 
 
+process cnvkit {
+	cpus 1
+	time '1h'
+	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
+	
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_cnvkit
+		set gr, vc, file(vcf) from vcf_cnvkit.groupTuple()
+		
+	output:
+		file("${group}.${id}.cnvkit.png")
+
+	script:
+		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
+
+		"""
+		cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
+		cnvkit.py scatter -s results/*.cn{s,r} -o ${group}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
+		"""
+
+}
+
+
 process aggregate_vcfs {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'
 
 	input:
-		set group, vc, file(vcfs) from concatenated_vcfs.mix(pindel_vcf).groupTuple()
+		set group, vc, file(vcfs) from concatenated_vcfs.mix(vcf_pindel).groupTuple()
 		set g, id, type from meta_aggregate.groupTuple()
 
 	output:
