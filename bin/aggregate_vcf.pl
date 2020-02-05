@@ -15,7 +15,7 @@ use Data::Dumper;
 #  * Add pindel support
 
 
-my @supported_callers = ('freebayes', 'mutect2', 'tnscope', 'vardict' );
+my @supported_callers = ('freebayes', 'mutect2', 'tnscope', 'vardict', 'pindel' );
 
 # Get command line options
 my %opt = ();
@@ -115,7 +115,9 @@ sub summarize_filters {
 sub fix_gt {
     my( $var, $vc ) = @_;
 
-    if( $vc eq "mutect2" or $vc eq "tnscope" or $vc eq "vardict" ) {
+    $var->{FORMAT} = []
+    
+    if( $vc =~ /^(mutect2|tnscope|vardict|pindel)$/ ) {
 	for my $gt ( @{$var->{GT}} ) {
 	    my ($ref_dp, $alt_dp) = (0,0);
 	    if( $gt->{AD} ) {
@@ -123,6 +125,7 @@ sub fix_gt {
 	    }
 	    add_gt( $var, $gt->{_sample_id}, "VAF", $gt->{AF} );
 	    add_gt( $var, $gt->{_sample_id}, "VD", $alt_dp );
+	    add_gt( $var, $gt->{_sample_id}, "DP", $alt_dp+$ref_dp );
 	}
     }
 
@@ -132,26 +135,13 @@ sub fix_gt {
 	    if( $gt->{AO} and $gt->{AO} ne "." ) {
 		$vaf = sprintf ":%.3f", $gt->{AO} / $gt->{DP};
 		add_gt( $var, $gt->{_sample_id}, "VAF", $vaf );
+		add_gt( $var, $gt->{_sample_id}, "VD", $gt->{AO});
+		add_gt( $var, $gt->{_sample_id}, "DP", $gt->{DP});
+		
 	    }
 	}
     }
 }
-
-
-	# PINDEL
-#	elsif( $caller eq "pindel" ) {
-#	    $out_vcf_str .= "\t".$full_info->{GT}->{ $translate_names->{$sample_name} }->{GT};
-#	    my( $ref_dp, $alt_dp ) = split /,/, $full_info->{GT}->{ $translate_names->{$sample_name} }->{AD};
-	    
-#	    $out_vcf_str .= ":".($ref_dp+$alt_dp);
-#	    $out_vcf_str .= ":".$alt_dp;
-#	    if( $alt_dp == 0 ) {
-#		$out_vcf_str .= ":0";
-#	    }
-#	    else {
-#		$out_vcf_str .= sprintf ":%.3f", $alt_dp / ($alt_dp + $ref_dp);
-#	    }
-#	}
 
 	# MANTA
 #	elsif( $caller eq "manta" ) {
@@ -295,6 +285,7 @@ sub which_variantcaller{
     if( $meta->{source} ) {
 	return "freebayes" if $meta->{source} =~ /freeBayes/;
 	return "mutect2" if $meta->{source} =~ /Mutect2/;
+	return "pindel" if $meta->{source} =~ /pindel/;
     }
     if( $meta->{'SentieonCommandLine.TNscope'} ) {
 	return "tnscope";
