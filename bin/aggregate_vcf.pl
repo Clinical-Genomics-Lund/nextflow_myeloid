@@ -121,8 +121,11 @@ sub fix_gt {
 	for my $gt ( @{$var->{GT}} ) {
 	    my ($ref_dp, $alt_dp) = (0,0);
 	    if( $gt->{AD} ) {
-		( $ref_dp, $alt_dp ) = split /,/, $gt->{AD};
+                my @a = split /,/, $gt->{AD};
+                $ref_dp = ($a[0] or "0");
+                $alt_dp = ($a[1] or "0");
 	    }
+            add_gt( $var, $gt->{_sample_id}, "GT", $gt->{GT});
 	    add_gt( $var, $gt->{_sample_id}, "VAF", $gt->{AF} );
 	    add_gt( $var, $gt->{_sample_id}, "VD", $alt_dp );
 	    add_gt( $var, $gt->{_sample_id}, "DP", $alt_dp+$ref_dp );
@@ -131,14 +134,16 @@ sub fix_gt {
 
     elsif( $vc eq "freebayes" ) {
 	for my $gt ( @{$var->{GT}} ) {
-	    my $vaf = 0;
+	    my( $vaf, $vd ) = (0,0);
 	    if( $gt->{AO} and $gt->{AO} ne "." ) {
-		$vaf = sprintf ":%.3f", $gt->{AO} / $gt->{DP};
-		add_gt( $var, $gt->{_sample_id}, "VAF", $vaf );
-		add_gt( $var, $gt->{_sample_id}, "VD", $gt->{AO});
-		add_gt( $var, $gt->{_sample_id}, "DP", $gt->{DP});
-		
-	    }
+		$vaf = sprintf "%.4f", $gt->{AO} / $gt->{DP};
+                $vd = $gt->{AO};
+            }
+            add_gt( $var, $gt->{_sample_id}, "GT", $gt->{GT});
+            add_gt( $var, $gt->{_sample_id}, "VAF", $vaf );
+            add_gt( $var, $gt->{_sample_id}, "VD", $vd);
+            add_gt( $var, $gt->{_sample_id}, "DP", $gt->{DP});
+
 	}
     }
 }
