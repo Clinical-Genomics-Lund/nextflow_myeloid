@@ -316,7 +316,8 @@ process pindel {
 			echo "$bam_normal\t\$INS_N\t$id_normal" >> pindel_config
 
 			pindel -f $genome_file -w 0.1 -x 2 -i pindel_config -j $params.pindel_regions_bed -o tmpout -T ${task.cpus}
-			pindel2vcf -P tmpout -r $genome_file -R hg19 -d 2015-01-01 -v ${group}_pindel.vcf -is 1 -e 50 -he 0.05
+			pindel2vcf -P tmpout -r $genome_file -R hg19 -d 2015-01-01 -v ${group}_pindel_unfilt.vcf -is 1 -e 50 -he 0.05
+			filter_pindel_somatic.pl ${group}_pindel_unfilt.vcf ${group}_pindel.vcf
 			"""
 
 		}
