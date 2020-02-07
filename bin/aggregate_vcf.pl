@@ -26,14 +26,38 @@ my @sample_order;
 @sample_order = split /,/, $opt{'sample-order'} if $opt{'sample-order'};
 
 # Aggregate the vcfs
-my( $agg_vars, $agg_header ) = aggregate_vcfs( @vcfs );
+my( $agg_vars, $agg_header, $filters ) = aggregate_vcfs( @vcfs );
 
 # Output final vcf
-system("zgrep ^# $vcfs[0]");
+print_header($filters, $vcfs[0]);
 foreach my $vid (keys %$agg_vars ) {
     vcfstr($agg_vars->{$vid}, \@sample_order);
 }
 
+
+sub print_header {
+    my $filters = shift;
+    my $file = shift;
+    
+    print "##fileformat=VCFv4.2\n";
+    print "##origin=".join(",", @vcfs)."\n";
+    print '##INFO=<ID=variant_callers,Number=.,Type=String,Description="List of variant callers which detected the variant">'."\n";
+    print '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">'."\n";
+    print '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">'."\n";
+    print '##FORMAT=<ID=VAF,Number=1,Type=Integer,Description="ALT allele observation fraction">'."\n";
+    print '##FORMAT=<ID=VD,Number=1,Type=Integer,Description="ALT allele observation count">'."\n";
+    foreach( @$filters ) {
+	print "##FILTER=<ID=$_,Description=\"$_\">\n";
+    }
+    if( @sample_order ) {
+	print "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t";
+	print join("\t", @sample_order)."\n";
+    }
+    else {
+	system("zgrep ^#CHROM $file");
+    }
+	    
+}
 
 
 sub aggregate_vcfs {
@@ -43,6 +67,7 @@ sub aggregate_vcfs {
     my %agg;
     my @headers;
 
+    my %all_filters;
     my %filters;
     
     foreach my $fn ( @vcfs ) {
@@ -63,7 +88,10 @@ sub aggregate_vcfs {
 	    # Collect all filters for each variant
 	    if( $var->{FILTER} ) {
 		my @vc_filters = split /;/, $var->{FILTER};
-		$filters{$simple_id}->{$_} = 1 foreach @vc_filters;
+		foreach( @vc_filters ) {
+		    $filters{$simple_id}->{$_} = 1;
+		    $all_filters{$_} = 1;
+		}
 	    }
 	    
 	    
@@ -82,7 +110,7 @@ sub aggregate_vcfs {
 	$agg{$id}->{FILTER} = summarize_filters( keys %{$filters{$id}} )
     }
     
-    return( \%agg, \@headers );
+    return( \%agg, \@headers, [keys %all_filters] );
 }
 
 sub aggregate_headers {
