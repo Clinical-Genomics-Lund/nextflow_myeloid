@@ -396,7 +396,7 @@ process aggregate_vcfs {
 		}
 
 		"""
-		aggregate_vcf.pl --vcf ${vcfs.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
+		aggregate_vcf.pl --vcf ${vcfs.sort().join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
 		"""
 }
 
