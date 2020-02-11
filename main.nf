@@ -189,8 +189,8 @@ process freebayes {
 	script:
 		if( mode == "paired" ) {
 
-			tumor_idx = type.findIndexOf{ it == 'tumor' }
-			normal_idx = type.findIndexOf{ it == 'normal' }
+			tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 
 			"""
 			freebayes -f $genome_file -t $bed --pooled-continuous --pooled-discrete --min-repeat-entropy 1 -F 0.03 ${bams[tumor_idx]} ${bams[normal_idx]} > freebayes_${bed}.vcf.raw
@@ -223,8 +223,8 @@ process vardict {
 	script:
 		if( mode == "paired" ) {
 
-			tumor_idx = type.findIndexOf{ it == 'tumor' }
-			normal_idx = type.findIndexOf{ it == 'normal' }
+			tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 
 			"""
 			vardict-java -G $genome_file -f 0.01 -N ${id[tumor_idx]} -b "${bams[tumor_idx]}|${bams[normal_idx]}" -c 1 -S 2 -E 3 -g 4 $bed \\
@@ -254,8 +254,8 @@ process tnscope {
 
 
 	script:
-		tumor_idx = type.findIndexOf{ it == 'tumor' }
-		normal_idx = type.findIndexOf{ it == 'normal' }
+		tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+		normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 
 		if( mode == 'paired' ) {
 			"""
@@ -300,8 +300,8 @@ process pindel {
 
 	script:
 		if( mode == "paired" ) {
-			tumor_idx = type.findIndexOf{ it == 'tumor' }
-			normal_idx = type.findIndexOf{ it == 'normal' }
+			tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 			ins_tumor = ins_size[tumor_idx]
 			ins_normal = ins_size[normal_idx]
 			bam_tumor = bams[tumor_idx]
@@ -390,8 +390,8 @@ process aggregate_vcfs {
 	script:
 		sample_order = id[0]
 		if( mode == "paired" ) {
-			tumor_idx = type.findIndexOf{ it == 'tumor' }
-			normal_idx = type.findIndexOf{ it == 'normal' }
+			tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 			sample_order = id[tumor_idx]+","+id[normal_idx]
 		}
 
@@ -446,8 +446,8 @@ process umi_confirm {
 	script:
 		if( mode == "paired" ) {
 
-			tumor_idx = type.findIndexOf{ it == 'tumor' }
-			normal_idx = type.findIndexOf{ it == 'normal' }
+			tumor_idx = type.findIndexOf{ it == 'tumor' or it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' or it == 'N' }
 
 			"""
 			source activate samtools
