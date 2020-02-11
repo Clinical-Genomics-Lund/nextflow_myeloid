@@ -147,14 +147,18 @@ sub fix_gt {
     
     if( $vc =~ /^(mutect2|tnscope|vardict|pindel)$/ ) {
 	for my $gt ( @{$var->{GT}} ) {
-	    my ($ref_dp, $alt_dp) = (0,0);
+	    my ($ref_dp, $alt_dp, $af) = (0,0,0);
 	    if( $gt->{AD} ) {
                 my @a = split /,/, $gt->{AD};
                 $ref_dp = ($a[0] or "0");
                 $alt_dp = ($a[1] or "0");
+		if( $alt_dp + $ref_dp > 0 ) {
+		    $af = $alt_dp / ($alt_dp+$ref_dp);
+		}
+		  
 	    }
             add_gt( $var, $gt->{_sample_id}, "GT", $gt->{GT});
-	    add_gt( $var, $gt->{_sample_id}, "VAF", $gt->{AF} );
+	    add_gt( $var, $gt->{_sample_id}, "VAF", ($gt->{AF} or $af) );
 	    add_gt( $var, $gt->{_sample_id}, "VD", $alt_dp );
 	    add_gt( $var, $gt->{_sample_id}, "DP", $alt_dp+$ref_dp );
 	}
