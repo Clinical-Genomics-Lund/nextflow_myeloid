@@ -373,16 +373,15 @@ process cnvkit {
 		set gr, id, type, file(bam), file(bai), file(bqsr), g, vc, file(vcf) from bam_cnvkit.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
-		file("${group}.${id}.cnvkit.png")
+		file("${gr}.${id}.cnvkit.png")
 
 	script:
 		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
 
 		"""
 		cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
-		cnvkit.py scatter -s results/*.cn{s,r} -o ${group}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
+		cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
 		"""
-
 }
 
 
