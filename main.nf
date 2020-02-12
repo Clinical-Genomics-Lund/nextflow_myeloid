@@ -316,12 +316,24 @@ process pindel {
 			echo "$bam_normal\t\$INS_N\t$id_normal" >> pindel_config
 
 			pindel -f $genome_file -w 0.1 -x 2 -i pindel_config -j $params.pindel_regions_bed -o tmpout -T ${task.cpus}
-			pindel2vcf -P tmpout -r $genome_file -R hg19 -d 2015-01-01 -v ${group}_pindel_unfilt.vcf -is 1 -e 50 -he 0.05
+			pindel2vcf -P tmpout -r $genome_file -R hg19 -d 2015-01-01 -v ${group}_pindel_unfilt.vcf -is 10 -e 30 -he 0.01
 			filter_pindel_somatic.pl ${group}_pindel_unfilt.vcf ${group}_pindel.vcf
 			"""
-
 		}
 		else {
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			ins_tumor = ins_size[tumor_idx]
+			bam_tumor = bams[tumor_idx]
+			id_tumor = id[tumor_idx]
+
+			"""
+			INS_T="\$(sed -n '3p' $ins_tumor | cut -f 1 | awk '{print int(\$1+0.5)}')"
+			echo "$bam_tumor\t\$INS_T\t$id_tumor" > pindel_config
+
+			pindel -f $genome_file -w 0.1 -x 2 -i pindel_config -j $params.pindel_regions_bed -o tmpout -T ${task.cpus}
+			pindel2vcf -P tmpout -r $genome_file -R hg19 -d 2015-01-01 -v ${group}_pindel_unfilt.vcf -is 10 -e 30 -he 0.01
+			filter_pindel_somatic.pl ${group}_pindel_unfilt.vcf ${group}_pindel.vcf
+			"""
 		}
 
 }
