@@ -278,7 +278,7 @@ process tnscope {
 			sentieon driver -t ${task.cpus} -r $genome_file \\
 				-i ${bams} -q ${bqsr} \\
 				--interval $bed --algo TNscope \\
-				--tumor_sample ${id} \\
+				--tumor_sample ${id[0]} \\
 				--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
 				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.00005 \\
 				tnscope_${bed}.vcf
