@@ -358,8 +358,7 @@ process cnvkit {
 	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
 	
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_cnvkit
-		set gr, vc, file(vcf) from vcf_cnvkit.groupTuple()
+		set gr, id, type, file(bam), file(bai), file(bqsr), g, vc, file(vcf) from bam_cnvkit.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
 		file("${group}.${id}.cnvkit.png")
