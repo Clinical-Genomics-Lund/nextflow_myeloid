@@ -252,6 +252,8 @@ process tnscope {
 	output:
 		set val("tnscope"), group, file("tnscope_${bed}.vcf") into vcfparts_tnscope
 
+	when:
+		params.tnscope
 
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
@@ -297,6 +299,9 @@ process pindel {
 
 	output:
 		set group, val("pindel"), file("${group}_pindel.vcf") into vcf_pindel
+
+	when:
+		params.pindel
 
 	script:
 		if( mode == "paired" ) {
@@ -374,6 +379,9 @@ process cnvkit {
 		
 	output:
 		file("${gr}.${id}.cnvkit.png")
+
+	when:
+		params.cnvkit
 
 	script:
 		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
