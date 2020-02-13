@@ -440,7 +440,7 @@ process annotate_vep {
 process umi_confirm {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 1
-	time '1h'
+	time '4h'
 
 	input:
 		set group, file(vcf) from vcf_umi
@@ -455,7 +455,6 @@ process umi_confirm {
 
 	script:
 		if( mode == "paired" ) {
-
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 
@@ -466,6 +465,8 @@ process umi_confirm {
 			"""
 		}
 		else if( mode == "unpaired" ) {
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+
 			"""
 			source activate samtools
 			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.vep.umi.vcf
