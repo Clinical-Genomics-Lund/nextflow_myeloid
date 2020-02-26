@@ -93,7 +93,8 @@ sub aggregate_vcfs {
 		    $all_filters{$_} = 1;
 		}
 	    }
-	    
+
+	    next if $vc eq "freebayes" and is_weird_freebayes($var);
 	    
 	    if( $agg{$simple_id} ) {
 		$agg{$simple_id}->{INFO}->{variant_callers} .= "|$vc";
@@ -120,6 +121,11 @@ sub aggregate_headers {
    
 }
 
+sub is_weird_freebayes {
+    my $var = shift;
+    return 1 unless defined $var->{GT}->[0]->{AD};
+    return 0;
+}
 
 sub summarize_filters {
     my @filters = @_;
