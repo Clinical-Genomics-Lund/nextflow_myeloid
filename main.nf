@@ -200,7 +200,9 @@ process freebayes {
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			freebayes -f $genome_file -t $bed --pooled-continuous --pooled-discrete --min-repeat-entropy 1 -F 0.03 $bams > freebayes_${bed}.vcf
+			freebayes -f $genome_file -t $bed --pooled-continuous --pooled-discrete --min-repeat-entropy 1 -F 0.03 $bams[0] > freebayes_${bed}.vcf.raw
+			vcffilter -F LowCov -f "DP > 500" -f "QA > 1500" freebayes_${bed}.vcf.raw | vcffilter -F LowFrq -o -f "AB > 0.05" -f "AB = 0" | vcfglxgt > freebayes_${bed}.filt1.vcf
+			filter_freebayes_unpaired.pl freebayes_${bed}.filt1.vcf > freebayes_${bed}.vcf
 			"""
 		}
 }
@@ -235,7 +237,8 @@ process vardict {
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			vardict-java -G $genome_file -f 0.03 -N $id -b $bams -c 1 -S 2 -E 3 -g 4 $bed | teststrandbias.R | var2vcf_valid.pl -N $id -E -f 0.01 > vardict_${bed}.vcf
+			vardict-java -G $genome_file -f 0.03 -N $id[0] -b $bams[0] -c 1 -S 2 -E 3 -g 4 $bed | teststrandbias.R | var2vcf_valid.pl -N $id[0] -E -f 0.01 > vardict_${bed}.vcf
+			filter_vardict_unpaired.pl vardict_${bed}.vcf.raw > vardict_${bed}.vcf
 			"""
 		}
 }
@@ -282,8 +285,10 @@ process tnscope {
 				--interval $bed --algo TNscope \\
 				--tumor_sample ${id[0]} \\
 				--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
-				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.00005 \\
+				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.0005 \\
 				tnscope_${bed}.vcf
+
+			filter_tnscope_unpaired.pl tnscope_${bed}.vcf.raw > tnscope_${bed}.vcf
 			""" 
 		}
 }
