@@ -18,7 +18,7 @@ Channel
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type) }
-    .set { meta_aggregate, meta_germline }
+    .into { meta_aggregate; meta_germline }
 
 
 
@@ -483,8 +483,7 @@ process mark_germlines {
 			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} > ${group}.vep.markgerm.vcf
 			"""
 		}
-
-	"""
+}
 
 
 process umi_confirm {
