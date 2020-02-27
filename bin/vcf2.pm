@@ -175,6 +175,7 @@ sub parse_variant {
 
     # Parse VEP annotation field, if any
     if( $var{ INFO }->{ CSQ } ) {
+	$var{ INFO }->{ _CSQ_str } = $var{INFO}->{CSQ};
 	$var{ INFO }->{ CSQ } = parse_VEP_CSQ( $var{INFO}->{CSQ}, $meta->{INFO}->{CSQ} );
     }
 

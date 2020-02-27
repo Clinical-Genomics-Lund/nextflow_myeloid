@@ -1,5 +1,5 @@
 #!/usr/bin/perl -w
-11;rgb:0000/0000/0000use strict;
+use strict;
 use File::Basename;
 use lib dirname (__FILE__);
 use vcf2;

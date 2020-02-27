@@ -18,7 +18,7 @@ Channel
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type) }
-    .set { meta_aggregate }
+    .set { meta_aggregate, meta_germline }
 
 
 
@@ -42,7 +42,7 @@ process bwa_umi {
 
 	output:
 		set group, id, type, file("${id}.${type}.bwa.umi.sort.bam"), file("${id}.${type}.bwa.umi.sort.bam.bai") into bam_umi_bqsr, bam_umi_confirm
-		set group, id, type, file("${id}.${type}.bwa.umi.sort.bam"), file("${id}.${type}.bwa.umi.sort.bam.bai"), file("dedup_metrics.txt") into bam_umi_qc
+		set group, id, type, file("${id}.${type}.bwa.sort.bam"), file("${id}.${type}.bwa.sort.bam.bai") into bam_umi_markdup
 
 	when:
 		params.umi
@@ -53,6 +53,7 @@ process bwa_umi {
 		-R "@RG\\tID:$id\\tSM:$id\\tLB:$id\\tPL:illumina" \\
 		-t ${task.cpus} \\
 		-p -C $genome_file - \\
+	|tee -a noumi.sam \\
 	|sentieon umi consensus -o consensus.fastq.gz
 
 	sentieon bwa mem \\
@@ -62,6 +63,9 @@ process bwa_umi {
 	|sentieon util sort -i - \\
 		-o ${id}.${type}.bwa.umi.sort.bam \\
 		--sam2bam
+
+	sentieon util sort -i noumi.sam -o ${id}.${type}.bwa.sort.bam --sam2bam
+	rm noumi.sam
 
 	touch dedup_metrics.txt
 	"""
@@ -110,7 +114,7 @@ process markdup {
 	time '1h'
     
 	input:
-		set group, id, type, file(bam), file(bai) from bam_markdup
+		set group, id, type, file(bam), file(bai) from bam_markdup.mix(bam_umi_markdup)
 
 	output:
 		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai") into bam_bqsr
@@ -119,21 +123,25 @@ process markdup {
 	"""
 	sentieon driver -t ${task.cpus} -i $bam --algo LocusCollector --fun score_info score.gz
 	sentieon driver -t ${task.cpus} -i $bam --algo Dedup --score_info score.gz --metrics dedup_metrics.txt ${id}.${type}.dedup.bam
-	sentieon driver -t ${task.cpus} -r $genome_file -i ${id}.${type}.dedup.bam --algo QualCal ${id}.bqsr.table
 	"""
 }
 
-
-process bqsr {
+// FIXME: Temporarily broke the non-UMI track since bam_umi_bqsr
+//        and bam_bqsr collide here for UMI track. Figure out how
+//        to use only bam_umi_bqsr when params.umi==true
+process bqsr_umi {
 	cpus params.cpu_some
 	memory '16 GB'
 	time '1h'
 
 	input:
-		set group, id, type, file(bam), file(bai) from bam_bqsr.mix(bam_umi_bqsr)
+		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_pindel, bam_cnvkit
+
+	when:
+		params.umi
 
 	"""
 	sentieon driver -t ${task.cpus} -r $genome_file -i $bam --algo QualCal ${id}.bqsr.table
@@ -148,7 +156,7 @@ process sentieon_qc {
 	time '1h'
 
 	input:
-		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc.mix(bam_umi_qc)
+		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
 
 	output:
 		set group, id, type, file("${id}_is_metrics.txt") into insertsize_pindel
@@ -200,7 +208,7 @@ process freebayes {
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			freebayes -f $genome_file -t $bed --pooled-continuous --pooled-discrete --min-repeat-entropy 1 -F 0.03 $bams[0] > freebayes_${bed}.vcf.raw
+			freebayes -f $genome_file -t $bed --pooled-continuous --pooled-discrete --min-repeat-entropy 1 -F 0.03 $bams > freebayes_${bed}.vcf.raw
 			vcffilter -F LowCov -f "DP > 500" -f "QA > 1500" freebayes_${bed}.vcf.raw | vcffilter -F LowFrq -o -f "AB > 0.05" -f "AB = 0" | vcfglxgt > freebayes_${bed}.filt1.vcf
 			filter_freebayes_unpaired.pl freebayes_${bed}.filt1.vcf > freebayes_${bed}.vcf
 			"""
@@ -237,7 +245,7 @@ process vardict {
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			vardict-java -G $genome_file -f 0.03 -N $id[0] -b $bams[0] -c 1 -S 2 -E 3 -g 4 $bed | teststrandbias.R | var2vcf_valid.pl -N $id[0] -E -f 0.01 > vardict_${bed}.vcf
+			vardict-java -G $genome_file -f 0.03 -N ${id[0]} -b ${bams[0]} -c 1 -S 2 -E 3 -g 4 $bed | teststrandbias.R | var2vcf_valid.pl -N ${id[0]} -E -f 0.01 > vardict_${bed}.vcf.raw
 			filter_vardict_unpaired.pl vardict_${bed}.vcf.raw > vardict_${bed}.vcf
 			"""
 		}
@@ -286,7 +294,7 @@ process tnscope {
 				--tumor_sample ${id[0]} \\
 				--clip_by_minbq 1 --max_error_per_read 3 --min_init_tumor_lod 2.0 \\
 				--min_base_qual 10 --min_base_qual_asm 10 --min_tumor_allele_frac 0.0005 \\
-				tnscope_${bed}.vcf
+				tnscope_${bed}.vcf.raw
 
 			filter_tnscope_unpaired.pl tnscope_${bed}.vcf.raw > tnscope_${bed}.vcf
 			""" 
@@ -432,9 +440,9 @@ process annotate_vep {
     
 	input:
 		set group, file(vcf) from vcf_vep
-
+    
 	output:
-		set group, file("${group}.vep.vcf") into vcf_umi
+		set group, file("${group}.vep.vcf") into vcf_germline
 
 	"""
 	vep -i ${vcf} -o ${group}.vep.vcf \\
@@ -449,6 +457,35 @@ process annotate_vep {
 	"""
 }
 
+process mark_germlines {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus params.cpu_many
+	time '20m'
+
+	input:
+		set group, file(vcf) from vcf_germline
+		set g, id, type from meta_germline.groupTuple()
+
+	output:
+		set group, file("${group}.vep.markgerm,vcf") into vcf_umi
+
+
+	script:
+		if( mode == "paired" ) {
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			"""
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[$tumor_idx]} --normal-id ${id[$normal_idx]} > ${group}.vep.markgerm.vcf
+			"""
+		}
+		else if( mode == "unpaired" ) {
+			"""
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} > ${group}.vep.markgerm.vcf
+			"""
+		}
+
+	"""
+
 
 process umi_confirm {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
@@ -460,7 +497,7 @@ process umi_confirm {
 		set g, id, type, file(bam), file(bai) from bam_umi_confirm.groupTuple()
 
 	output:
-		file("${group}.vep.umi.vcf")
+		file("${group}.vep.markgerm.umi.vcf")
 
 
 	when:
@@ -474,7 +511,7 @@ process umi_confirm {
 			"""
 			source activate samtools
 			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > umitmp.vcf
-			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.umi.vcf
+			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.markgerm.umi.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
@@ -482,7 +519,7 @@ process umi_confirm {
 
 			"""
 			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.vep.umi.vcf
+			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.vep.markgerm.umi.vcf
 			"""
 		}
 }

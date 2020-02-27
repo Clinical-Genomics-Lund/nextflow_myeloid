@@ -53,12 +53,7 @@ while ( my $v = $vcf->next_var() ) {
 
 	# If in a homopolymer or dinucleotide repeat
 	if( length($repeat_seq) <= 2 and $repeat_units_num >= 10 ) {
-	    if( $is_indel or !$vaf{N} or $vaf{T} / $vaf{N} >= $MIN_VAF_HOMOPOLYMER_RATIO ) {
-		push @status, "WARN_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
-	    }
-	    else {
-		push @status, "FAIL_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
-	    }
+	    push @status, "WARN_HOMOPOLYMER_".($is_indel?"INDEL":"SNV");
 	}
 
 	# Warn/fail on high strand bias (SOR)
