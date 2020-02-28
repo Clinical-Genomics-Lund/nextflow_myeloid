@@ -475,7 +475,7 @@ process mark_germlines {
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			"""
-			mark_germlines.pl --vcf $vcf --tumor-id ${id[$tumor_idx]} --normal-id ${id[$normal_idx]} > ${group}.vep.markgerm.vcf
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[tumor_idx]} --normal-id ${id[normal_idx]} > ${group}.vep.markgerm.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
