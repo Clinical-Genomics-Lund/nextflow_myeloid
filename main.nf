@@ -18,7 +18,7 @@ Channel
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type) }
-    .into { meta_aggregate; meta_germline }
+    .into { meta_aggregate; meta_germline; meta_pon }
 
 
 
@@ -416,7 +416,7 @@ process aggregate_vcfs {
 		set g, id, type from meta_aggregate.groupTuple()
 
 	output:
-		set group, file("${group}.agg.vcf") into vcf_vep
+		set group, file("${group}.agg.vcf") into vcf_pon
 
 	script:
 		sample_order = id[0]
@@ -431,6 +431,30 @@ process aggregate_vcfs {
 		"""
 }
 
+process pon_filter {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus 1
+	time '1h'
+
+	input:
+		set group, file(vcf) from vcf_pon
+
+	ouput:
+		set group, file("${group}.agg.pon.vcf") into vcf_vep
+		set g, id, type from meta_pon.groupTuple()
+
+	script:
+		def pons = []
+		if{ params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
+		if{ params.vardict )   { pons.push("freebayes="+params.PON_vardict) }
+		if{ params.tnscope )   { pons.push("freebayes="+params.PON_tnscope) }
+		def pons_str = pons.join(",")
+		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+
+	"""
+	./filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
+	"""
+
 
 process annotate_vep {
 	container = '/fs1/resources/containers/container_VEP.sif'
@@ -442,10 +466,10 @@ process annotate_vep {
 		set group, file(vcf) from vcf_vep
     
 	output:
-		set group, file("${group}.vep.vcf") into vcf_germline
+		set group, file("${group}.agg.pon.vep.vcf") into vcf_germline
 
 	"""
-	vep -i ${vcf} -o ${group}.vep.vcf \\
+	vep -i ${vcf} -o ${group}.agg.pon.vep.vcf \\
 	--offline --merged --everything --vcf --no_stats \\
 	--fork ${task.cpus} \\
 	--force_overwrite \\
@@ -467,7 +491,7 @@ process mark_germlines {
 		set g, id, type from meta_germline.groupTuple()
 
 	output:
-		set group, file("${group}.vep.markgerm,vcf") into vcf_umi
+		set group, file("${group}.agg.pon.vep.markgerm,vcf") into vcf_umi
 
 
 	script:
@@ -475,12 +499,12 @@ process mark_germlines {
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			"""
-			mark_germlines.pl --vcf $vcf --tumor-id ${id[tumor_idx]} --normal-id ${id[normal_idx]} > ${group}.vep.markgerm.vcf
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[tumor_idx]} --normal-id ${id[normal_idx]} > ${group}.agg.pon.vep.markgerm.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} > ${group}.vep.markgerm.vcf
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} > ${group}.agg.pon.vep.markgerm.vcf
 			"""
 		}
 }
@@ -496,7 +520,7 @@ process umi_confirm {
 		set g, id, type, file(bam), file(bai) from bam_umi_confirm.groupTuple()
 
 	output:
-		file("${group}.vep.markgerm.umi.vcf")
+		file("${group}.agg.pon.vep.markgerm.umi.vcf")
 
 
 	when:
@@ -510,7 +534,7 @@ process umi_confirm {
 			"""
 			source activate samtools
 			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > umitmp.vcf
-			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.vep.markgerm.umi.vcf
+			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
@@ -518,7 +542,7 @@ process umi_confirm {
 
 			"""
 			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.vep.markgerm.umi.vcf
+			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
 			"""
 		}
 }
