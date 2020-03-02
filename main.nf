@@ -21,6 +21,12 @@ Channel
     .into { meta_aggregate; meta_germline; meta_pon }
 
 
+Channel
+    .fromPath(params.csv).splitCsv(header:true)
+    .map{ row-> tuple(row.group, row.type, row.clarity_sample_id, row.clarity_pool_id) }
+    .set { meta_coyote }
+
+
 
 // Split bed file in to smaller parts to be used for parallel variant calling
 Channel
@@ -520,7 +526,7 @@ process umi_confirm {
 		set g, id, type, file(bam), file(bai) from bam_umi_confirm.groupTuple()
 
 	output:
-		file("${group}.agg.pon.vep.markgerm.umi.vcf")
+		set group, file("${group}.agg.pon.vep.markgerm.umi.vcf") into vcf_coyote
 
 
 	when:
@@ -545,4 +551,25 @@ process umi_confirm {
 			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
 			"""
 		}
+}
+
+
+process coyote {
+	publishDir "${params.crondir}/coyote", mode: 'copy', overwrite: true
+	cpus 1
+	time '10m'
+
+	input:
+		set group, file(vcf) from vcf_coyote
+		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
+
+	output:
+		file("${group}.coyote")
+
+	script:
+		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+
+	"""
+	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf ${vcf} --id $group --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}
+	"""
 }
