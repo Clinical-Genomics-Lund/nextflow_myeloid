@@ -438,23 +438,23 @@ process pon_filter {
 
 	input:
 		set group, file(vcf) from vcf_pon
-
-	ouput:
-		set group, file("${group}.agg.pon.vcf") into vcf_vep
 		set g, id, type from meta_pon.groupTuple()
+
+	output:
+		set group, file("${group}.agg.pon.vcf") into vcf_vep
 
 	script:
 		def pons = []
-		if{ params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
-		if{ params.vardict )   { pons.push("freebayes="+params.PON_vardict) }
-		if{ params.tnscope )   { pons.push("freebayes="+params.PON_tnscope) }
+		if( params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
+		if( params.vardict )   { pons.push("vardict="+params.PON_vardict) }
+		if( params.tnscope )   { pons.push("tnscope="+params.PON_tnscope) }
 		def pons_str = pons.join(",")
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	./filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
+	filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
 	"""
-
+}
 
 process annotate_vep {
 	container = '/fs1/resources/containers/container_VEP.sif'
@@ -491,7 +491,7 @@ process mark_germlines {
 		set g, id, type from meta_germline.groupTuple()
 
 	output:
-		set group, file("${group}.agg.pon.vep.markgerm,vcf") into vcf_umi
+		set group, file("${group}.agg.pon.vep.markgerm.vcf") into vcf_umi
 
 
 	script:
