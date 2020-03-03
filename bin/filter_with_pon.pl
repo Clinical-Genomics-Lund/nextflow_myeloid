@@ -78,9 +78,9 @@ sub read_pon {
     my %pon;
     while(<PON>) {
 	chomp;
-	my( $var, $num_non_germ, $germline, $total, $mean_vaf, $stdev_vaf, $all_vafs) = split /\t/;
+	my( $var, $vars, $germline, $total, $mean_vaf, $stdev_vaf, $all_vafs) = split /\t/;
 	$pon{$var} = {
-	    'num_non_germ'=>$num_non_germ,
+	    'num_non_germ'=>($vars-$germline),
 	    'total'=>$total,
 	    'mean_vaf'=>$mean_vaf,
 	    'stdev_vaf'=>$stdev_vaf,
