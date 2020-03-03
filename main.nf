@@ -570,6 +570,6 @@ process coyote {
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf ${vcf} --id $group --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}
+	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf ${vcf} --id $group --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
