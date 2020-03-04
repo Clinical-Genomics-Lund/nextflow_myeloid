@@ -20,7 +20,6 @@ Channel
     .map{ row-> tuple(row.group, row.id, row.type) }
     .into { meta_aggregate; meta_germline; meta_pon }
 
-
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.type, row.clarity_sample_id, row.clarity_pool_id) }
@@ -397,7 +396,7 @@ process cnvkit {
 		set gr, id, type, file(bam), file(bai), file(bqsr), g, vc, file(vcf) from bam_cnvkit.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
-		file("${gr}.${id}.cnvkit.png")
+		file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
 
 	when:
 		params.cnvkit
@@ -562,6 +561,7 @@ process coyote {
 	input:
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
+		file(cnvplot) from cnvplot_coyote
 
 	output:
 		file("${group}.coyote")
@@ -570,6 +570,6 @@ process coyote {
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf ${vcf} --id $group --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
