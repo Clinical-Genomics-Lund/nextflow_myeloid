@@ -143,7 +143,7 @@ process bqsr_umi {
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_pindel, bam_cnvkit
+		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit
 
 	when:
 		params.umi
@@ -164,7 +164,7 @@ process sentieon_qc {
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
 
 	output:
-		set group, id, type, file("${id}_is_metrics.txt") into insertsize_pindel
+		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
 		set id, file("${id}_${type}.QC")
 
 	"""
@@ -309,11 +309,11 @@ process tnscope {
 
 process pindel {
 	cpus params.cpu_some
-	time '30 m'
+	time '1h'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 
 	input:
-		set group, id, type, file(bams), file(bais), file(bqsr), file(ins_size) from bam_pindel.join(insertsize_pindel, by:[0,1,2]).groupTuple()
+		set group, id, type, file(bams), file(bais), file(ins_size) from all_pindel.groupTuple()
 
 	output:
 		set group, val("pindel"), file("${group}_pindel.vcf") into vcf_pindel
