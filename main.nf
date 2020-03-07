@@ -517,8 +517,8 @@ process mark_germlines {
 
 process umi_confirm {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-	cpus 1
-	time '4h'
+	cpus 2
+	time '8h'
 
 	input:
 		set group, file(vcf) from vcf_umi
