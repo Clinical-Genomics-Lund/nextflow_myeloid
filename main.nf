@@ -171,7 +171,7 @@ process sentieon_qc {
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
-		set id, file("${id}_${type}.QC") into qc_cdm
+		set id, type, file("${id}_${type}.QC") into qc_cdm
 
 	"""
 	sentieon driver \\
@@ -196,7 +196,7 @@ process qc_to_cdm {
 	publishDir "${CRONDIR}/qc", mode: 'copy' , overwrite: 'true'
 
 	input:
-		set id, file(qc), r1, r2 from qc_cdm.join(meta_qc)
+		set id, type, file(qc), r1, r2 from qc_cdm.join(meta_qc)
 
 	output:
 		file("${id}.cdm") into cdm_done
@@ -206,8 +206,8 @@ process qc_to_cdm {
 		idx =  parts.findIndexOf {it ==~ /......_......_...._........../}
 		rundir = parts[0..idx].join("/")
 
-	"""                                                                                                                                                                         
-	echo "--run-folder $rundir --sample-id $id --assay GMSmyeloid --qc ${OUTDIR}/qc/${id}.QC" > ${id}.cdm                                                        
+	"""
+	echo "--run-folder $rundir --sample-id $id --assay GMSmyeloid --qc ${OUTDIR}/QC/${id}_${type}.QC" > ${id}.cdm
 	"""
 }
 
