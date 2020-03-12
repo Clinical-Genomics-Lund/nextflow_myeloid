@@ -3,6 +3,7 @@
 genome_file = file(params.genome_file)
 
 OUTDIR = params.outdir+'/'+params.subdir
+CRONDIR = params.crondir
 
 csv = file(params.csv)
 mode = csv.countLines() > 2 ? "paired" : "unpaired"
@@ -24,6 +25,11 @@ Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.type, row.clarity_sample_id, row.clarity_pool_id) }
     .set { meta_coyote }
+
+Channel
+    .fromPath(params.csv).splitCsv(header:true)
+    .map{ row-> tuple(row.id, row.read1, row.read2) }
+    .set{ meta_qc }
 
 
 
@@ -165,7 +171,7 @@ process sentieon_qc {
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
-		set id, file("${id}_${type}.QC")
+		set id, file("${id}_${type}.QC") into qc_cdm
 
 	"""
 	sentieon driver \\
@@ -183,6 +189,28 @@ process sentieon_qc {
 	qc_sentieon.pl ${id}_${type} panel > ${id}_${type}.QC
 	"""
 }
+
+// Load QC data into CDM (via middleman)
+process qc_to_cdm {
+	cpus 1
+	publishDir "${CRONDIR}/qc", mode: 'copy' , overwrite: 'true'
+
+	input:
+		set id, file(qc), r1, r2 from qc_cdm.join(meta_qc)
+
+	output:
+		file("${id}.cdm") into cdm_done
+
+	script:
+		parts = r1.split('/')
+		idx =  parts.findIndexOf {it ==~ /......_......_...._........../}
+		rundir = parts[0..idx].join("/")
+
+	"""                                                                                                                                                                         
+	echo "--run-folder $rundir --sample-id $id --assay GMSmyeloid --qc ${OUTDIR}/qc/${id}.QC" > ${id}.cdm                                                        
+	"""
+}
+
 
 
 process freebayes {
@@ -396,7 +424,7 @@ process cnvkit {
 		set gr, id, type, file(bam), file(bai), file(bqsr), g, vc, file(vcf) from bam_cnvkit.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
-		file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
+		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
 
 	when:
 		params.cnvkit
@@ -404,10 +432,10 @@ process cnvkit {
 	script:
 		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
 
-		"""
-		cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
-		cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
-		"""
+	"""
+	cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
+	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
+	"""
 }
 
 
@@ -561,15 +589,16 @@ process coyote {
 	input:
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
-		file(cnvplot) from cnvplot_coyote
+		set g2, cnv_type, file(cnvplot) from cnvplot_coyote.groupTuple()
 
 	output:
 		file("${group}.coyote")
 
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
