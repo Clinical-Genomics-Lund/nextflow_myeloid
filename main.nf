@@ -47,6 +47,8 @@ process bwa_umi {
 	cpus params.cpu_all
 	memory '128 GB'
 	time '2h'
+	errorStrategy 'retry'
+	maxErrors 5
 
 	input:
 		set group, id, type, file(r1), file(r2) from fastq_umi
