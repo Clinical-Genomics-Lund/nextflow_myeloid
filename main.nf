@@ -217,7 +217,7 @@ process qc_to_cdm {
 
 process freebayes {
 	cpus 1
-	time '20m'
+	time '40m'
 	
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_freebayes.groupTuple()
@@ -253,7 +253,7 @@ process freebayes {
 
 process vardict {
 	cpus 1
-	time '20m'
+	time '40m'
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_vardict.groupTuple()
