@@ -61,6 +61,9 @@ process bwa_umi {
 		params.umi
 
 	"""
+
+	export skip_coord_end=true
+	
 	sentieon umi extract -d 3M2S+T,3M2S+T $r1 $r2 \\
 	|sentieon bwa mem \\
 		-R "@RG\\tID:$id\\tSM:$id\\tLB:$id\\tPL:illumina" \\
