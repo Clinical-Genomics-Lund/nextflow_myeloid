@@ -1,7 +1,10 @@
 #!/usr/bin/perl -w
 use strict;
+use FindBin;
+use lib $FindBin::Bin;
 use vcf2;
 use Data::Dumper;
+
 
 my $vcf_filemask = $ARGV[0];
 
