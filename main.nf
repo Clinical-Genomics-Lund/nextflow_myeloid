@@ -154,7 +154,7 @@ process bqsr_umi {
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit
+		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit, bam_melt
 
 	when:
 		params.umi
@@ -176,7 +176,8 @@ process sentieon_qc {
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
-		set id, type, file("${id}_${type}.QC") into qc_cdm
+		set id, type, file("${id}_${type}.QC") into qc_to_cdm
+		set group, type, id, file("${id}_${type}.QC") qc_melt
 
 	"""
 	sentieon driver \\
@@ -443,6 +444,69 @@ process cnvkit {
 	"""
 }
 
+qc_melt
+	.groupTuple()
+	.set{ qc_tables }
+process melt {
+	cpus 16
+	errorStrategy 'ignore'
+	container = '/fs1/resources/containers/container_twist-brca.sif'
+
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt
+		set group2, type2, id2, qc from qc_tables
+
+	when:
+		params.melt
+
+	output:
+		set group, file("${id}.melt.vcf") into melt_vcf
+
+	script:
+		if(mode == "paired") { 
+			normal_index = bam.findIndexOf{ it ==~ /normal_.+/ }
+			normal = bam[normal_index]
+			normal_id = id[normal_index]
+			qc_index = type2.findIndexOf{ it ==~ /normal/ }
+			qc = qc[qc_index]
+		}
+		else {
+			qc = qc[0]
+		}
+		// Collect qc-data if possible from normal sample, if only tumor; tumor
+		qc.readLines().each{
+			if (it =~ /\"(ins_size_dev)\" : \"(\S+)\"/) {
+				ins_dev = it =~ /\"(ins_size_dev)\" : \"(\S+)\"/
+			}
+			if (it =~ /\"(mean_coverage)\" : \"(\S+)\"/) {
+				coverage = it =~ /\"(mean_coverage)\" : \"(\S+)\"/
+			}
+			if (it =~ /\"(ins_size)\" : \"(\S+)\"/) {
+				ins_size = it =~ /\"(ins_size)\" : \"(\S+)\"/
+			}
+		}
+		// might need to be defined for -resume to work "def INS_SIZE" and so on....
+		INS_SIZE = ins_size[0][2]
+		MEAN_DEPTH = coverage[0][2]
+		COV_DEV = ins_dev[0][2]
+
+	"""
+	java -jar  /opt/MELT.jar Single \\
+		-bamfile $bam \\
+		-r 150 \\
+		-h $genome_file \\
+		-n $bed_melt \\
+		-z 50000 \\
+		-d 50 -t $mei_list \\
+		-w . \\
+		-b 1/2/3/4/5/6/7/8/9/10/11/12/14/15/16/18/19/20/21/22 \\
+		-c $MEAN_DEPTH \\
+		-cov $COV_DEV \\
+		-e $INS_SIZE
+	merge_melt.pl $params.meltheader $id
+	"""
+
+}
 
 process aggregate_vcfs {
 	cpus 1
