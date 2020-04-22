@@ -200,8 +200,8 @@ process sentieon_qc {
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
-		set id, type, file("${id}_${type}.QC") into qc_to_cdm
-		set group, type, id, file("${id}_${type}.QC") qc_melt
+		set id, type, file("${id}_${type}.QC") into qc_cdm
+		set group, type, id, file("${id}_${type}.QC") into qc_melt
 
 	"""
 	sentieon driver \\
