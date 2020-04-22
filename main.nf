@@ -519,9 +519,9 @@ process melt {
 		-bamfile $bam \\
 		-r 150 \\
 		-h $genome_file \\
-		-n $bed_melt \\
+		-n $params.bed_melt \\
 		-z 50000 \\
-		-d 50 -t $mei_list \\
+		-d 50 -t $params.mei_list \\
 		-w . \\
 		-b 1/2/3/4/5/6/7/8/9/10/11/12/14/15/16/18/19/20/21/22 \\
 		-c $MEAN_DEPTH \\
@@ -583,7 +583,7 @@ process pon_filter {
 }
 
 process annotate_vep {
-	container = '/fs1/resources/containers/container_VEP.sif'
+	container = params.vepcon
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus params.cpu_many
 	time '1h'
