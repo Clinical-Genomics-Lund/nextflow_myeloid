@@ -178,7 +178,7 @@ process bqsr_umi {
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit, bam_melt
+		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit, bam_melt, bam_manta
 
 	when:
 		params.umi
@@ -477,8 +477,8 @@ process melt {
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt
-		set group2, type2, id2, qc from qc_tables
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.view()
+		set group2, type2, id2, qc from qc_tables.view()
 
 	when:
 		params.melt
@@ -488,11 +488,12 @@ process melt {
 
 	script:
 		if(mode == "paired") { 
-			normal_index = bam.findIndexOf{ it ==~ /normal_.+/ }
-			normal = bam[normal_index]
-			normal_id = id[normal_index]
-			qc_index = type2.findIndexOf{ it ==~ /normal/ }
-			qc = qc[qc_index]
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			normal = bam[normal_idx]
+			normal_id = id[normal_idx]
+			qc = qc[normal_idx]
+
 		}
 		else {
 			qc = qc[0]
@@ -516,7 +517,7 @@ process melt {
 
 	"""
 	java -jar  /opt/MELT.jar Single \\
-		-bamfile $bam \\
+		-bamfile ${bam[normal_idx]} \\
 		-r 150 \\
 		-h $genome_file \\
 		-n $params.bed_melt \\
@@ -530,6 +531,61 @@ process melt {
 	merge_melt.pl $params.meltheader $id
 	"""
 
+}
+
+// MANTA SINGLE AND PAIRED
+process manta {
+	cpus 16
+	time '10h'
+	
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta
+
+	output:
+		set group, file("${group}_manta.vcf") into manta_vcf
+
+	when:
+		params.manta
+	
+	script:
+		if(mode == "paired") { 
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			normal = bam[normal_idx]
+			normal_id = id[normal_idx]
+			tumor = bam[tumor_idx]
+			tumor_id = id[tumor_idx]
+
+			"""
+			configManta.py \\
+				--tumorBam $tumor \\
+				--normalBam $normal \\
+				--reference $genome_file \\
+				--exome \\
+				--callRegions $params.bedgz \\
+				--generateEvidenceBam \\
+				--runDir .
+			python runWorkflow.py -m local -j ${task.cpus}
+			#filter_manta_paired.pl results/variants/somaticSV.vcf.gz > ${group}_manta.vcf
+			mv results/variants/tumorSV.vcf.gz ${group}_manta.vcf.gz
+			gunzip ${group}_manta.vcf.gz
+			"""
+		}
+		else {
+			"""
+			configManta.py \\
+				--tumorBam $bam \\
+				--reference $genome_file \\
+				--exome \\
+				--callRegions $params.bedgz \\
+				--generateEvidenceBam \\
+				--runDir .
+			python runWorkflow.py -m local -j ${task.cpus}
+			#filter_manta.pl results/variants/tumorSV.vcf.gz > ${group}_manta.vcf
+			mv results/variants/tumorSV.vcf.gz ${group}_manta.vcf.gz
+			gunzip ${group}_manta.vcf.gz
+			"""
+		}
 }
 
 process aggregate_vcfs {
