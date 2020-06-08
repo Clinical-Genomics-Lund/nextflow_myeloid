@@ -487,13 +487,13 @@ process melt {
 		set group, file("${id}.melt.vcf") into melt_vcf
 
 	script:
-		if(mode == "paired") { 
-			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-			normal = bam[normal_idx]
-			normal_id = id[normal_idx]
-			qc = qc[normal_idx]
+		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+		normal = bam[normal_idx]
+		normal_id = id[normal_idx]
 
+		if(mode == "paired") { 
+			qc = qc[normal_idx]
 		}
 		else {
 			qc = qc[0]
