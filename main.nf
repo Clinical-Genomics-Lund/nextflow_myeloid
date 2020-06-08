@@ -192,7 +192,7 @@ process bqsr_umi {
 process sentieon_qc {
 	cpus params.cpu_many
 	memory '32 GB'
-	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
+	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true', pattern: '*.QC*'
 	time '1h'
 
 	input:
