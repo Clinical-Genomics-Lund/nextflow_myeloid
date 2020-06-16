@@ -11,12 +11,25 @@ my $MAX_VAF_NORMAL = 0.05;
 my $MIN_VAF_NORMAL = 0.35;
 my $MIN_VAF_TUMOR  = 0.45;
 my $MIN_DP = 100;
-my %GENES = ('CEBPA'=>1);
+my %genes_per_assay = (
+    'myeloid'=>{'CEBPA'=>1},
+    'ovarial'=>{'ALL_GENES'=>1}
+    );
+
 
 # Get command line options
 my %opt = ();
-GetOptions( \%opt, 'vcf=s', 'tumor-id=s', 'normal-id=s' );
+GetOptions( \%opt, 'vcf=s', 'tumor-id=s', 'normal-id=s', 'assay=s' );
 check_options( \%opt );
+
+# Default to myeloid genes, for backwards compatibility
+my %GENES = %{$genes_per_assay{'myeloid'}};
+
+if( $opt{'assay'} ) {
+    my $assay = $opt{'assay'};
+    die "No genes set for assay: $assay\n" if !$genes_per_assay{$assay};
+    %GENES = %{$genes_per_assay{$assay}};
+}
 
 my $vcf = vcf2->new('file'=>$opt{vcf} );
 
@@ -31,7 +44,7 @@ while ( my $var = $vcf->next_var() ) {
     # Check if variant is in one of the selected genes
     my $in_relevant_gene = 0;
     for my $tx ( @{ $var->{INFO}->{CSQ} } ) {
-	if( $GENES{ $tx->{SYMBOL} } ) {
+	if( $GENES{ $tx->{SYMBOL} } or $GENES{'ALL_GENES'} ) {
 	    $in_relevant_gene = 1;
 	}
     }
@@ -107,6 +120,7 @@ sub help_text {
     print "   --vcf        Input vcf\n";
     print "   --normal-id  Normal sample ID\n";
     print "   --tumor-id   Tumor sample ID\n";
+    print "   --assay      Select an assay. Determines which genes are included\n";
     print "\n";
     exit(0);
 }
