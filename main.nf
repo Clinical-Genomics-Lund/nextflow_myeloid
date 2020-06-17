@@ -178,8 +178,7 @@ process bqsr_umi {
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit, bam_melt, bam_manta
-
+		set group, id, type, file(bam), file(bai), file("${id}.bqsr.table") into bam_freebayes, bam_vardict, bam_tnscope, bam_cnvkit, bam_varli
 	when:
 		params.umi
 
@@ -199,7 +198,7 @@ process sentieon_qc {
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel
+		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt
 		set id, type, file("${id}_${type}.QC") into qc_cdm
 		set group, type, id, file("${id}_${type}.QC") into qc_melt
 
@@ -537,9 +536,10 @@ process melt {
 process manta {
 	cpus 16
 	time '10h'
+	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
 	
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta.groupTuple()
 
 	output:
 		set group, file("${group}_manta.vcf") into manta_vcf
@@ -567,7 +567,7 @@ process manta {
 				--runDir .
 			python runWorkflow.py -m local -j ${task.cpus}
 			#filter_manta_paired.pl results/variants/somaticSV.vcf.gz > ${group}_manta.vcf
-			mv results/variants/tumorSV.vcf.gz ${group}_manta.vcf.gz
+			mv results/variants/somaticSV.vcf.gz ${group}_manta.vcf.gz
 			gunzip ${group}_manta.vcf.gz
 			"""
 		}
@@ -691,40 +691,48 @@ process mark_germlines {
 		}
 }
 
-
 process umi_confirm {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 2
 	time '8h'
+
+	when:
+		params.umi
 
 	input:
 		set group, file(vcf) from vcf_umi
 		set g, id, type, file(bam), file(bai) from bam_umi_confirm.groupTuple()
 
 	output:
-		set group, file("${group}.agg.pon.vep.markgerm.umi.vcf") into vcf_coyote
+		set group, file("${group}.agg.pon.vep.markgerm.umi*") into vcf_coyote
 
-
-	when:
-		params.umi
 
 	script:
-		if( mode == "paired" ) {
-			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+		if (params.conform) {
+	
+			if( mode == "paired" ) {
+				tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+				normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 
-			"""
-			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > umitmp.vcf
-			UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
-			"""
+				"""
+				source activate samtools
+				UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > umitmp.vcf
+				UMIconfirm_vcf.py ${bam[normal_idx]} umitmp.vcf $genome_file ${id[normal_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
+				"""
+			}
+			else if( mode == "unpaired" ) {
+				tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+
+				"""
+				source activate samtools
+				UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
+				"""
+			}
+
 		}
-		else if( mode == "unpaired" ) {
-			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-
+		else {
 			"""
-			source activate samtools
-			UMIconfirm_vcf.py ${bam[tumor_idx]} $vcf $genome_file ${id[tumor_idx]} > ${group}.agg.pon.vep.markgerm.umi.vcf
+			cp $vcf ${group}.agg.pon.vep.markgerm.umino.vcf
 			"""
 		}
 }
@@ -748,6 +756,103 @@ process coyote {
 		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group myeloid_GMSv1 --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
+
+
+process varlo_merge_prepro{
+	cpus 1
+	time '1h'   
+
+	when:
+		mode == 'paired'
+
+	input:
+		set group, id, type, file(bams), file(bais), file(bqsr) from bam_varli.groupTuple()
+
+	output:
+		set group, id, file("${id}.normal.observations.bcf"), file("${id}.tumor.observations.bcf") into tum_normal_obs
+
+	script:
+		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+	
+	"""
+	python /fs1/viktor/nextflow_ovarian/bin/merge_for_varlociraptor.py --callers 'vardict,tnscope,freebayes' --dir $params.vcfs_path --output CandidateVariants.vcf
+	varlociraptor preprocess variants $genome_file --bam ${bams[normal_idx]} --output ${id}.normal.observations.bcf < CandidateVariants.vcf
+	varlociraptor preprocess variants $genome_file --bam ${bams[tumor_idx]} --output ${id}.tumor.observations.bcf < CandidateVariants.vcf
+	"""
+	}
+
+
+
+process varloci_calling_TN {
+	cpus 1
+	time '1h' 
+	publishDir "$OUTDIR/vcf", mode :'copy'
+
+	input:
+		set group, val(id), file(normal_bcf), file(tumor_bcf) from tum_normal_obs
+
+	output:
+		set group, val(id), file("${id}.varloci.calls.bcf") into calls_bcf, calls_bcf2
+
+	script:
+	
+	"""
+	varlociraptor call variants tumor-normal --purity 0.50 --tumor ${tumor_bcf} --normal ${normal_bcf} --output ${id}.varloci.calls.bcf
+	"""
+}
+
+// process varlociCalling_generic {
+
+// 	publishDir "$OUTDIR/vcf", mode :'copy'
+// 	tag "${smpl_id}"
+// 	//when:
+// 	//	params.generic
+// 	input:
+// 		set val(smpl_id), file(tumor_bcf) from tum_obs
+// 	output:
+// 		set val(smpl_id), file("${smpl_id}.varloci.calls.bcf") into calls_bcf, calls_bcf2
+// 	script:
+// 	//tumor is the name of sample given in the scenario.
+// 	"""
+// 	varlociraptor call variants  generic --scenario scenario.yaml --obs tumor=${tumor_bcf} > ${smpl_id}.varloci.calls.bcf
+// 	"""
+// }
+
+//based on the given event in scenario you change the events param in filtering processes down here:
+// process  FDR_filtering {
+
+// 	publishDir "$OUTDIR/vcf", mode :'copy'
+// 	tag "${smpl_id}"
+	 
+// 	when:
+// 		params.fdr
+// 	input:
+// 		set group, val(id), file(calls_file) from calls_bcf
+// 	output:
+// 		set val(smpl_id), file ("${smpl_id}.calls.fdrFilter.bcf") into callsfiltered
+// 	script:
+// 	"""
+// 	varlociraptor filter-calls control-fdr ${calls_file} --events SOMATIC_TUMOR --fdr 0.05 --var SNV > ${smpl_id}.calls.fdrFilter.bcf
+// 	"""
+// 	}
+
+// process posteriorOdds_filtering {
+// 	publishDir "$OUTDIR/vcf", mode :'copy'
+// 	tag "${smpl_id}"
+	
+// 	when:
+// 		params.posteriorOdds
+		
+// 	input:
+//                 set val(smpl_id), file(calls_file) from calls_bcf2
+// 	output:
+//                 set val(smpl_id), file ("${smpl_id}.calls.posteriorFilter.bcf") into callsfiltered_post
+//     script:
+// 	"""
+// 	varlociraptor filter-calls posterior-odds --events SOMATIC_TUMOR --odds strong < ${calls_file} > ${smpl_id}.calls.posteriorFilter.bcf  
+// 	"""
+// 	 }
