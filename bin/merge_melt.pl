@@ -39,7 +39,7 @@ foreach my $file (@files) {
     my $size = -s $file;
     if ($size < 1) { next; }
 
-    my $vcf = CMD::vcf2->new('file'=>$file);
+    my $vcf = vcf2->new('file'=>$file);
     my $out = $file."mod";
     open (OUT, '>' ,$out);
     my @header = split/\n/,$vcf->{header_str};
