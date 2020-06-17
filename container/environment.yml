@@ -21,3 +21,4 @@ dependencies:
     - bioconda::perl-vcftools-vcf=0.1.16
     - bioconda::vt=2015.11.10
     - bioconda::perl-app-cpanminus==1.7044
+    - bioconda::varlociraptor==1.7.2
