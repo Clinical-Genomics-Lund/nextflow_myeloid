@@ -316,7 +316,7 @@ process vardict {
 
 process tnscope {
 	cpus params.cpu_some
-	time '1h'    
+	time '2h'    
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
@@ -476,8 +476,8 @@ process melt {
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.view()
-		set group2, type2, id2, qc from qc_tables.view()
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt
+		set group2, type2, id2, qc from qc_tables
 
 	when:
 		params.melt
@@ -598,7 +598,7 @@ process aggregate_vcfs {
 		set g, id, type from meta_aggregate.groupTuple()
 
 	output:
-		set group, file("${group}.agg.vcf") into vcf_pon
+		set group, file("${group}.agg.vcf") into vcf_pon, vcf_done
 
 	script:
 		sample_order = id[0]
@@ -681,12 +681,12 @@ process mark_germlines {
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			"""
-			mark_germlines.pl --vcf $vcf --tumor-id ${id[tumor_idx]} --normal-id ${id[normal_idx]} > ${group}.agg.pon.vep.markgerm.vcf
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[tumor_idx]} --normal-id ${id[normal_idx]} --assay $params.assay > ${group}.agg.pon.vep.markgerm.vcf
 			"""
 		}
 		else if( mode == "unpaired" ) {
 			"""
-			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} > ${group}.agg.pon.vep.markgerm.vcf
+			mark_germlines.pl --vcf $vcf --tumor-id ${id[0]} --assay $params.assay > ${group}.agg.pon.vep.markgerm.vcf
 			"""
 		}
 }
@@ -762,47 +762,106 @@ process coyote {
 
 
 process varlo_merge_prepro{
-	cpus 1
-	time '1h'   
+	cpus 5
+	time '5h'
 
 	when:
 		mode == 'paired'
 
-	input:
-		set group, id, type, file(bams), file(bais), file(bqsr) from bam_varli.groupTuple()
 
 	output:
-		set group, id, file("${id}.normal.observations.bcf"), file("${id}.tumor.observations.bcf") into tum_normal_obs
+		file("CandidateVariants.vcf") into candidate
 
-	script:
-		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-	
 	"""
-	python /fs1/viktor/nextflow_ovarian/bin/merge_for_varlociraptor.py --callers 'vardict,tnscope,freebayes' --dir $params.vcfs_path --output CandidateVariants.vcf
-	varlociraptor preprocess variants $genome_file --bam ${bams[normal_idx]} --output ${id}.normal.observations.bcf < CandidateVariants.vcf
-	varlociraptor preprocess variants $genome_file --bam ${bams[tumor_idx]} --output ${id}.tumor.observations.bcf < CandidateVariants.vcf
+	source activate py3-env
+	python3 /fs1/viktor/nextflow_ovarian/bin/merge_for_varlociraptor.py --callers 'vardict,tnscope,freebayes' --dir $params.vcfs_path --output CandidateVariants.vcf
 	"""
 	}
 
-
-
-process varloci_calling_TN {
+process split_candidates {
 	cpus 1
-	time '1h' 
+	time '20m'
+
+	input:
+		file(vcf) from candidate
+
+	output:
+		file("*.parts") into candidate_parts
+
+	'''
+	grep -v '^#' CandidateVariants.vcf | split -l 1000 - --filter='sh -c "{ grep ^# CandidateVariants.vcf; cat; } > $FILE.parts"'
+	'''
+
+}
+
+process preprocess {
+	cpus 1
+	time '20m'
+
+	input:
+		set group, id, type, file(bam), file(bais), file(bqsr) from bam_varli
+		each file(part) from candidate_parts
+
+	output:
+		set group, id, type, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
+
+	"""
+	source activate py3-env
+    varlociraptor preprocess variants $genome_file --bam ${bam} --output ${id}.${type}.observations.${part}.bcf < $part
+	bcftools sort ${id}.${type}.observations.${part}.bcf > ${id}.${type}.observations.${part}.sort.bcf
+	bgzip ${id}.${type}.observations.${part}.sort.bcf
+	bcftools index ${id}.${type}.observations.${part}.sort.bcf.gz
+	"""
+
+}
+
+
+process concatenate_vcfs_varlo {
+	cpus 1
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	time '20m'    
+
+	input:
+		set group, id, type, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
+
+	output:
+		set group, id, type, file("${id}_${type}.concat.bcf") into varlo_call_vcf
+
+	"""
+	bcftools concat -a $vcfs > tmp.merged.bcf
+	bcftools sort tmp.merged.bcf -O u > ${id}_${type}.concat.bcf
+	"""
+}
+
+
+
+process varloci_calling {
+	cpus 1
+	time '3h' 
 	publishDir "$OUTDIR/vcf", mode :'copy'
 
 	input:
-		set group, val(id), file(normal_bcf), file(tumor_bcf) from tum_normal_obs
+		set group, id, type, file(bcfs) from varlo_call_vcf.groupTuple()
 
 	output:
 		set group, val(id), file("${id}.varloci.calls.bcf") into calls_bcf, calls_bcf2
 
 	script:
+		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 	
-	"""
-	varlociraptor call variants tumor-normal --purity 0.50 --tumor ${tumor_bcf} --normal ${normal_bcf} --output ${id}.varloci.calls.bcf
-	"""
+		if (mode == 'paired') {
+			"""
+			source activate py3-env
+			varlociraptor call variants tumor-normal --purity 0.50 --tumor ${bcfs[tumor_idx]} --normal ${bcfs[normal_idx]} > ${group}.varloci.calls.bcf
+			"""
+		}
+		else {
+			"""
+			source activate py3-env
+			varlociraptor call variants generic --scenario scenario.yaml --obs tumor=$bcfs > ${id}.varloci.calls.bcf
+			"""
+		}
 }
 
 // process varlociCalling_generic {
