@@ -200,7 +200,7 @@ process sentieon_qc {
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt
 		set id, type, file("${id}_${type}.QC") into qc_cdm
-		set group, type, id, file("${id}_${type}.QC") into qc_melt
+		set group, id, type, file("${id}_${type}.QC") into qc_melt
 
 	"""
 	sentieon driver \\
@@ -240,7 +240,39 @@ process qc_to_cdm {
 	"""
 }
 
+process qc_values {
+	tag "$id"
+	time '2m'
+	memory '50 MB'
 
+	input:
+		set group, id, type, qc from qc_melt
+
+	output:
+		set group, id, type, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) into qc_melt_val
+		set id, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) into qc_cnvkit_val
+	
+	script:
+		// Collect qc-data if possible from normal sample, if only tumor; tumor
+		qc.readLines().each{
+			if (it =~ /\"(ins_size_dev)\" : \"(\S+)\"/) {
+				ins_dev = it =~ /\"(ins_size_dev)\" : \"(\S+)\"/
+			}
+			if (it =~ /\"(mean_coverage)\" : \"(\S+)\"/) {
+				coverage = it =~ /\"(mean_coverage)\" : \"(\S+)\"/
+			}
+			if (it =~ /\"(ins_size)\" : \"(\S+)\"/) {
+				ins_size = it =~ /\"(ins_size)\" : \"(\S+)\"/
+			}
+		}
+		// might need to be defined for -resume to work "def INS_SIZE" and so on....
+		INS_SIZE = ins_size[0][2]
+		MEAN_DEPTH = coverage[0][2]
+		COV_DEV = ins_dev[0][2]
+		"""
+		echo $INS_SIZE $MEAN_DEPTH $COV_DEV > qc.val
+		"""
+}
 
 process freebayes {
 	cpus 1
@@ -450,10 +482,12 @@ process cnvkit {
 	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
 	
 	input:
-		set gr, id, type, file(bam), file(bai), file(bqsr), g, vc, file(vcf) from bam_cnvkit.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
+		set gr, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV), g, vc, file(vcf) from bam_cnvkit.join(qc_cnvkit_val, by:2).combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
+		//set id, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_cnvkit_val
 		
 	output:
 		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
+		set gr, id, type, file("${gr}.${id}.filtered") into cnvkit_vcf
 
 	when:
 		params.cnvkit
@@ -463,21 +497,20 @@ process cnvkit {
 
 	"""
 	cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
+	cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
+	filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
 	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
 	"""
 }
 
-qc_melt
-	.groupTuple()
-	.set{ qc_tables }
 process melt {
 	cpus 16
 	errorStrategy 'ignore'
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt
-		set group2, type2, id2, qc from qc_tables
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.groupTuple()
+		set group, id, type_qc, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_melt_val.groupTuple()
 
 	when:
 		params.melt
@@ -486,37 +519,28 @@ process melt {
 		set group, file("${id}.melt.vcf") into melt_vcf
 
 	script:
-		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-		normal = bam[normal_idx]
-		normal_id = id[normal_idx]
 
-		if(mode == "paired") { 
-			qc = qc[normal_idx]
+	 	if (mode == "paired") {
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			tumor_qc_idx = type2.findIndexOf{ it == 'normal' || it == 'N' }
+			normal_qc_idx = type2.findIndexOf{ it == 'normal' || it == 'N' }
+			bamn = bam[normal_idx]
+			idn = id[normal_idx]
+			MD = MEAN_DEPTH[normal_qc_idx]
+			CD = COV_DEV[normal_qc_idx]
+			IS = INS_SIZE[normal_qc_idx]
 		}
 		else {
-			qc = qc[0]
+			bamn = bam
+			MD = MEAN_DEPTH
+			CD = COV_DEV
+			IS = INS_SIZE
 		}
-		// Collect qc-data if possible from normal sample, if only tumor; tumor
-		qc.readLines().each{
-			if (it =~ /\"(ins_size_dev)\" : \"(\S+)\"/) {
-				ins_dev = it =~ /\"(ins_size_dev)\" : \"(\S+)\"/
-			}
-			if (it =~ /\"(mean_coverage)\" : \"(\S+)\"/) {
-				coverage = it =~ /\"(mean_coverage)\" : \"(\S+)\"/
-			}
-			if (it =~ /\"(ins_size)\" : \"(\S+)\"/) {
-				ins_size = it =~ /\"(ins_size)\" : \"(\S+)\"/
-			}
-		}
-		// might need to be defined for -resume to work "def INS_SIZE" and so on....
-		INS_SIZE = ins_size[0][2]
-		MEAN_DEPTH = coverage[0][2]
-		COV_DEV = ins_dev[0][2]
-
+		
 	"""
 	java -jar  /opt/MELT.jar Single \\
-		-bamfile ${bam[normal_idx]} \\
+		-bamfile $bamn \\
 		-r 150 \\
 		-h $genome_file \\
 		-n $params.bed_melt \\
@@ -524,9 +548,9 @@ process melt {
 		-d 50 -t $params.mei_list \\
 		-w . \\
 		-b 1/2/3/4/5/6/7/8/9/10/11/12/14/15/16/18/19/20/21/22 \\
-		-c $MEAN_DEPTH \\
-		-cov $COV_DEV \\
-		-e $INS_SIZE
+		-c $MD \\
+		-cov $CD \\
+		-e $IS
 	merge_melt.pl $params.meltheader $id
 	"""
 
@@ -766,7 +790,7 @@ process varlo_merge_prepro{
 	time '5h'
 
 	when:
-		mode == 'paired'
+		params.varlo
 
 
 	output:
@@ -859,7 +883,7 @@ process varloci_calling {
 		else {
 			"""
 			source activate py3-env
-			varlociraptor call variants generic --scenario scenario.yaml --obs tumor=$bcfs > ${id}.varloci.calls.bcf
+			varlociraptor call variants generic --scenario scenario.yaml --obs tumor=$bcfs > ${group}.varloci.calls.bcf
 			"""
 		}
 }
