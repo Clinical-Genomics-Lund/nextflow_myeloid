@@ -7,6 +7,7 @@ CRONDIR = params.crondir
 
 csv = file(params.csv)
 mode = csv.countLines() > 2 ? "paired" : "unpaired"
+println(csv)
 println(mode)
 
 workflow.onComplete {
@@ -73,6 +74,7 @@ process bwa_umi {
 	time '2h'
 	errorStrategy 'retry'
 	maxErrors 5
+	tag "$id"
 
 	input:
 		set group, id, type, file(r1), file(r2) from fastq_umi
@@ -116,6 +118,7 @@ process bwa_align {
 	cpus params.cpu_all
 	memory '64 GB'
 	time '2h'
+	tag "$id"
 	    
 	input: 
 		set group, id, type, file(r1), file(r2) from fastq_noumi
@@ -152,6 +155,7 @@ process markdup {
 	cpus params.cpu_many
 	memory '64 GB'
 	time '1h'
+	tag "$id"
     
 	input:
 		set group, id, type, file(bam), file(bai) from bam_markdup.mix(bam_umi_markdup)
@@ -173,6 +177,7 @@ process bqsr_umi {
 	cpus params.cpu_some
 	memory '16 GB'
 	time '1h'
+	tag "$id"
 
 	input:
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
@@ -193,6 +198,7 @@ process sentieon_qc {
 	memory '32 GB'
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true', pattern: '*.QC*'
 	time '1h'
+	tag "$id"
 
 	input:
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
@@ -223,6 +229,7 @@ process sentieon_qc {
 process qc_to_cdm {
 	cpus 1
 	publishDir "${CRONDIR}/qc", mode: 'copy' , overwrite: 'true'
+	tag "$id"
 
 	input:
 		set id, type, file(qc), r1, r2 from qc_cdm.join(meta_qc)
@@ -244,13 +251,14 @@ process qc_values {
 	tag "$id"
 	time '2m'
 	memory '50 MB'
+	tag "$id"
 
 	input:
 		set group, id, type, qc from qc_melt
 
 	output:
 		set group, id, type, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) into qc_melt_val
-		set id, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) into qc_cnvkit_val
+		set group, id, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) into qc_cnvkit_val
 	
 	script:
 		// Collect qc-data if possible from normal sample, if only tumor; tumor
@@ -277,6 +285,7 @@ process qc_values {
 process freebayes {
 	cpus 1
 	time '40m'
+	tag "$group"
 	
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_freebayes.groupTuple()
@@ -313,6 +322,7 @@ process freebayes {
 process vardict {
 	cpus 1
 	time '40m'
+	tag "$group"
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_vardict.groupTuple()
@@ -348,7 +358,8 @@ process vardict {
 
 process tnscope {
 	cpus params.cpu_some
-	time '2h'    
+	time '2h'   
+	tag "$group" 
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_tnscope.groupTuple()
@@ -400,6 +411,7 @@ process pindel {
 	cpus params.cpu_some
 	time '1h'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	tag "$group"
 
 	input:
 		set group, id, type, file(bams), file(bais), file(ins_size) from all_pindel.groupTuple()
@@ -461,6 +473,7 @@ process concatenate_vcfs {
 	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'    
+	tag "$group"
 
 	input:
 		set vc, group, file(vcfs) from vcfs_to_concat
@@ -480,10 +493,11 @@ process cnvkit {
 	cpus 1
 	time '1h'
 	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
+	tag "$id"
 	
 	input:
-		set gr, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV), g, vc, file(vcf) from bam_cnvkit.join(qc_cnvkit_val, by:2).combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
-		//set id, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_cnvkit_val
+		set gr, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV),g ,vc, file(vcf) from bam_cnvkit.join(qc_cnvkit_val, by:[0,1]) \
+			.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
 		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
@@ -505,37 +519,40 @@ process cnvkit {
 
 process melt {
 	cpus 16
-	errorStrategy 'ignore'
 	container = '/fs1/resources/containers/container_twist-brca.sif'
+	memory '10 GB'
+	tag "$group"
 
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.groupTuple()
-		set group, id, type_qc, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_melt_val.groupTuple()
+		set group, id_qc, type_qc, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_melt_val.groupTuple()
 
 	when:
 		params.melt
 
 	output:
-		set group, file("${id}.melt.vcf") into melt_vcf
+		set group, file("${sid}.melt.merged.vcf") into melt_vcf
 
 	script:
 
 	 	if (mode == "paired") {
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-			tumor_qc_idx = type2.findIndexOf{ it == 'normal' || it == 'N' }
-			normal_qc_idx = type2.findIndexOf{ it == 'normal' || it == 'N' }
+			tumor_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
+			normal_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
 			bamn = bam[normal_idx]
 			idn = id[normal_idx]
 			MD = MEAN_DEPTH[normal_qc_idx]
 			CD = COV_DEV[normal_qc_idx]
 			IS = INS_SIZE[normal_qc_idx]
+			sid = id[normal_idx]
 		}
 		else {
 			bamn = bam
 			MD = MEAN_DEPTH
 			CD = COV_DEV
 			IS = INS_SIZE
+			sid = id
 		}
 		
 	"""
@@ -551,7 +568,7 @@ process melt {
 		-c $MD \\
 		-cov $CD \\
 		-e $IS
-	merge_melt.pl $params.meltheader $id
+	merge_melt.pl $params.meltheader $sid
 	"""
 
 }
@@ -561,6 +578,7 @@ process manta {
 	cpus 16
 	time '10h'
 	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
+	tag "$group"
 	
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta.groupTuple()
@@ -616,6 +634,7 @@ process aggregate_vcfs {
 	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'
+	tag "$group"
 
 	input:
 		set group, vc, file(vcfs) from concatenated_vcfs.mix(vcf_pindel).groupTuple()
@@ -641,6 +660,7 @@ process pon_filter {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 1
 	time '1h'
+	tag "$group"
 
 	input:
 		set group, file(vcf) from vcf_pon
@@ -667,6 +687,7 @@ process annotate_vep {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus params.cpu_many
 	time '1h'
+	tag "$group"
     
 	input:
 		set group, file(vcf) from vcf_vep
@@ -691,6 +712,7 @@ process mark_germlines {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus params.cpu_many
 	time '20m'
+	tag "$group"
 
 	input:
 		set group, file(vcf) from vcf_germline
@@ -719,6 +741,7 @@ process umi_confirm {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 2
 	time '8h'
+	tag "$group"
 
 	when:
 		params.umi
@@ -766,6 +789,7 @@ process coyote {
 	publishDir "${params.crondir}/coyote", mode: 'copy', overwrite: true
 	cpus 1
 	time '10m'
+	tag "$group"
 
 	input:
 		set group, file(vcf) from vcf_coyote
@@ -788,6 +812,7 @@ process coyote {
 process varlo_merge_prepro{
 	cpus 5
 	time '5h'
+	tag "$group"
 
 	when:
 		params.varlo
@@ -805,6 +830,7 @@ process varlo_merge_prepro{
 process split_candidates {
 	cpus 1
 	time '20m'
+	tag "$group"
 
 	input:
 		file(vcf) from candidate
@@ -821,6 +847,7 @@ process split_candidates {
 process preprocess {
 	cpus 1
 	time '20m'
+	tag "$id"
 
 	input:
 		set group, id, type, file(bam), file(bais), file(bqsr) from bam_varli
@@ -844,6 +871,7 @@ process concatenate_vcfs_varlo {
 	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'    
+	tag "$id"
 
 	input:
 		set group, id, type, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
@@ -863,12 +891,13 @@ process varloci_calling {
 	cpus 1
 	time '3h' 
 	publishDir "$OUTDIR/vcf", mode :'copy'
+	tag "$group"
 
 	input:
 		set group, id, type, file(bcfs) from varlo_call_vcf.groupTuple()
 
 	output:
-		set group, val(id), file("${id}.varloci.calls.bcf") into calls_bcf, calls_bcf2
+		set group, val(id), file("${group}.varloci.calls.bcf") into calls_bcf, calls_bcf2
 
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
@@ -888,24 +917,6 @@ process varloci_calling {
 		}
 }
 
-// process varlociCalling_generic {
-
-// 	publishDir "$OUTDIR/vcf", mode :'copy'
-// 	tag "${smpl_id}"
-// 	//when:
-// 	//	params.generic
-// 	input:
-// 		set val(smpl_id), file(tumor_bcf) from tum_obs
-// 	output:
-// 		set val(smpl_id), file("${smpl_id}.varloci.calls.bcf") into calls_bcf, calls_bcf2
-// 	script:
-// 	//tumor is the name of sample given in the scenario.
-// 	"""
-// 	varlociraptor call variants  generic --scenario scenario.yaml --obs tumor=${tumor_bcf} > ${smpl_id}.varloci.calls.bcf
-// 	"""
-// }
-
-//based on the given event in scenario you change the events param in filtering processes down here:
 // process  FDR_filtering {
 
 // 	publishDir "$OUTDIR/vcf", mode :'copy'
