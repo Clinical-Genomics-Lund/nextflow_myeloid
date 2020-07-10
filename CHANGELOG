@@ -1,0 +1,8 @@
+## Changelog ##
+
+2020-07-10
+Merged master with ovarian:
+# queue set to high
+# allow umiconform-skipping
+# profiles, hg19/hg38 and myeloid/ovarian
+# dev version of varlociraptor calling
