@@ -237,6 +237,9 @@ process qc_to_cdm {
 	output:
 		file("${id}.cdm") into cdm_done
 
+	when:
+		!params.noupload
+
 	script:
 		parts = r1.split('/')
 		idx =  parts.findIndexOf {it ==~ /......_......_...._........../}
@@ -798,6 +801,9 @@ process coyote {
 
 	output:
 		file("${group}.coyote")
+
+	when:
+		!params.noupload
 
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
