@@ -36,6 +36,14 @@ workflow.onComplete {
 	logFile.append(error)
 }
 
+// Print commit-version of active deployment
+file(params.git)
+    .readLines()
+    .each { println "git commit-hash: "+it }
+// Print active container
+container = file(params.container).toRealPath()
+println("container: "+container)
+
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type, file(row.read1), file(row.read2)) }
@@ -548,11 +556,11 @@ process melt {
 			sid = id[normal_idx]
 		}
 		else {
-			bamn = bam
-			MD = MEAN_DEPTH
-			CD = COV_DEV
-			IS = INS_SIZE
-			sid = id
+			bamn = bam[0]
+			MD = MEAN_DEPTH[0]
+			CD = COV_DEV[0]
+			IS = INS_SIZE[0]
+			sid = id[0]
 		}
 		
 	"""
@@ -814,6 +822,9 @@ process varlo_merge_prepro{
 	time '5h'
 	tag "$group"
 
+	input:
+		set group, file(vcf) from vcf_done
+
 	when:
 		params.varlo
 
@@ -912,7 +923,7 @@ process varloci_calling {
 		else {
 			"""
 			source activate py3-env
-			varlociraptor call variants generic --scenario scenario.yaml --obs tumor=$bcfs > ${group}.varloci.calls.bcf
+			varlociraptor call variants generic --scenario $params.varlo --obs tumor=$bcfs > ${group}.varloci.calls.bcf
 			"""
 		}
 }
