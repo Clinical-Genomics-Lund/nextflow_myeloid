@@ -854,6 +854,7 @@ process split_candidates {
 	'''
 
 }
+candidate_parts.flatMap().set{ cp }
 
 process preprocess {
 	cpus 1
@@ -861,8 +862,8 @@ process preprocess {
 	tag "$id"
 
 	input:
-		set group, id, type, file(bam), file(bais), file(bqsr) from bam_varli
-		each file(part) from candidate_parts
+		set group, id, type, file(bam), file(bais), file(bqsr), file(part) from bam_varli.combine(cp)
+		//each file(part) from candidate_parts
 
 	output:
 		set group, id, type, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
