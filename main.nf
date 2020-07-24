@@ -51,8 +51,8 @@ Channel
 
 Channel
     .fromPath(params.csv).splitCsv(header:true)
-    .map{ row-> tuple(row.group, row.id, row.type) }
-    .into { meta_aggregate; meta_germline; meta_pon }
+    .map{ row-> tuple(row.group, row.id, row.type, (row.containsKey("ffpe") ? row.ffpe : false)) }
+    .into { meta_aggregate; meta_germline; meta_pon; meta_cnvkit; meta_melt }
 
 Channel
     .fromPath(params.csv).splitCsv(header:true)
@@ -509,7 +509,7 @@ process cnvkit {
 		
 	output:
 		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
-		set gr, id, type, file("${gr}.${id}.filtered") into cnvkit_vcf
+		set gr, id, type, file("${gr}.${id}.filtered.vcf") into cnvkit_vcf
 
 	when:
 		params.cnvkit
@@ -521,51 +521,30 @@ process cnvkit {
 	cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
 	cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
 	filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
+	cnvkit.py export vcf ${gr}.${id}.filtered > ${gr}.${id}.filtered.vcf
 	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
 	"""
 }
 
 process melt {
-	cpus 16
+	cpus 2
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 	memory '10 GB'
 	tag "$group"
 
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.groupTuple()
-		set group, id_qc, type_qc, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_melt_val.groupTuple()
-
+		set group, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from bam_melt \
+			.join(qc_melt_val, by: [0,1,2])
+		
 	when:
 		params.melt
 
 	output:
-		set group, file("${sid}.melt.merged.vcf") into melt_vcf
+		set group, id, type, file("${id}.melt.merged.vcf") into melt_vcf
 
-	script:
-
-	 	if (mode == "paired") {
-			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-			tumor_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
-			normal_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
-			bamn = bam[normal_idx]
-			idn = id[normal_idx]
-			MD = MEAN_DEPTH[normal_qc_idx]
-			CD = COV_DEV[normal_qc_idx]
-			IS = INS_SIZE[normal_qc_idx]
-			sid = id[normal_idx]
-		}
-		else {
-			bamn = bam[0]
-			MD = MEAN_DEPTH[0]
-			CD = COV_DEV[0]
-			IS = INS_SIZE[0]
-			sid = id[0]
-		}
-		
 	"""
 	java -jar  /opt/MELT.jar Single \\
-		-bamfile $bamn \\
+		-bamfile $bam \\
 		-r 150 \\
 		-h $genome_file \\
 		-n $params.bed_melt \\
@@ -573,10 +552,10 @@ process melt {
 		-d 50 -t $params.mei_list \\
 		-w . \\
 		-b 1/2/3/4/5/6/7/8/9/10/11/12/14/15/16/18/19/20/21/22 \\
-		-c $MD \\
-		-cov $CD \\
-		-e $IS
-	merge_melt.pl $params.meltheader $sid
+		-c $MEAN_DEPTH \\
+		-cov $COV_DEV \\
+		-e $INS_SIZE
+	merge_melt.pl $params.meltheader $id
 	"""
 
 }
@@ -638,6 +617,36 @@ process manta {
 		}
 }
 
+process concat_cnv {
+	cpus 1
+	memory '1GB'
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	time '20m'
+
+	input:
+		set g, file(mantavcf) from manta_vcf
+		set g_c, id_c, type_c, file(cnvkitvcf), tissue_c from cnvkit_vcf.groupTuple().join(meta_cnvkit, by:[0,1])
+		set g_m, id_m, type_m, file(meltvcf), tissue_m from melt_vcf.groupTuple().join(meta_melt, by:[0,1])
+
+	output:
+		set group, file("${group}.cnvs.vcf") into cnvs
+	
+	script:
+	
+	if (mode == 'paired') {
+		tumor_idx = type_c.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx_c = type_c.findIndexOf{ it == 'normal' || it == 'N' }
+		normal_idx_m = type_m.findIndexOf{ it == 'normal' || it == 'N' }
+		if (tissue_c[tumor_idx] == 'ffpe') {
+			cnvkit_vcf = cnvkitvcf[normal_idx_c]
+			meltvcf = meltvcf[normal_idx_m]
+		}
+	}
+	"""
+	vcf-concat $mantavcf $cnvkitvcf $meltvcf | vcf-sort -c > ${group}.cnvs.vcf
+	"""
+}
+
 process aggregate_vcfs {
 	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
@@ -646,7 +655,7 @@ process aggregate_vcfs {
 
 	input:
 		set group, vc, file(vcfs) from concatenated_vcfs.mix(vcf_pindel).groupTuple()
-		set g, id, type from meta_aggregate.groupTuple()
+		set g, id, type, tissue from meta_aggregate.groupTuple()
 
 	output:
 		set group, file("${group}.agg.vcf") into vcf_pon, vcf_done
@@ -672,7 +681,7 @@ process pon_filter {
 
 	input:
 		set group, file(vcf) from vcf_pon
-		set g, id, type from meta_pon.groupTuple()
+		set g, id, type, tissue from meta_pon.groupTuple()
 
 	output:
 		set group, file("${group}.agg.pon.vcf") into vcf_vep
@@ -724,7 +733,7 @@ process mark_germlines {
 
 	input:
 		set group, file(vcf) from vcf_germline
-		set g, id, type from meta_germline.groupTuple()
+		set g, id, type, tissue from meta_germline.groupTuple()
 
 	output:
 		set group, file("${group}.agg.pon.vep.markgerm.vcf") into vcf_umi
@@ -866,8 +875,12 @@ process preprocess {
 		//each file(part) from candidate_parts
 
 	output:
-		set group, id, type, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
+		set group, id, type, slice, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
 
+	script:
+		pattern = part =~ /(\w+)\.(parts)/
+		slice = pattern[0][1]
+	
 	"""
 	source activate py3-env
     varlociraptor preprocess variants $genome_file --bam ${bam} --output ${id}.${type}.observations.${part}.bcf < $part
@@ -886,12 +899,13 @@ process concatenate_vcfs_varlo {
 	tag "$id"
 
 	input:
-		set group, id, type, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
+		set group, id, type, slice, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
 
 	output:
 		set group, id, type, file("${id}_${type}.concat.bcf") into varlo_call_vcf
 
 	"""
+	echo $slice > test
 	bcftools concat -a $vcfs > tmp.merged.bcf
 	bcftools sort tmp.merged.bcf -O u > ${id}_${type}.concat.bcf
 	"""
