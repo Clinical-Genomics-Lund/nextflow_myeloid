@@ -10,6 +10,7 @@ mode = csv.countLines() > 2 ? "paired" : "unpaired"
 println(csv)
 println(mode)
 
+
 workflow.onComplete {
 
 	def msg = """\
@@ -831,8 +832,8 @@ process varlo_merge_prepro{
 	time '5h'
 	tag "$group"
 
-	input:
-		set group, file(vcf) from vcf_done
+	//input:
+	//	set group, file(vcf) from vcf_done
 
 	when:
 		params.varlo
@@ -869,18 +870,19 @@ process preprocess {
 	cpus 1
 	time '20m'
 	tag "$id"
+	memory '1GB'
 
 	input:
 		set group, id, type, file(bam), file(bais), file(bqsr), file(part) from bam_varli.combine(cp)
 		//each file(part) from candidate_parts
 
 	output:
-		set group, id, type, slice, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
+		//set group, id, type, slice, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
+		set group, id, type, val(slice), file("${id}.${type}.observations.${part}.bcf") into varlo_call_vcf
 
 	script:
 		pattern = part =~ /(\w+)\.(parts)/
 		slice = pattern[0][1]
-	
 	"""
 	source activate py3-env
     varlociraptor preprocess variants $genome_file --bam ${bam} --output ${id}.${type}.observations.${part}.bcf < $part
@@ -892,38 +894,17 @@ process preprocess {
 }
 
 
-process concatenate_vcfs_varlo {
-	cpus 1
-	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-	time '20m'    
-	tag "$id"
-
-	input:
-		set group, id, type, slice, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
-
-	output:
-		set group, id, type, file("${id}_${type}.concat.bcf") into varlo_call_vcf
-
-	"""
-	echo $slice > test
-	bcftools concat -a $vcfs > tmp.merged.bcf
-	bcftools sort tmp.merged.bcf -O u > ${id}_${type}.concat.bcf
-	"""
-}
-
-
-
 process varloci_calling {
 	cpus 1
-	time '3h' 
-	publishDir "$OUTDIR/vcf", mode :'copy'
+	time '20m' 
+	//publishDir "$OUTDIR/vcf", mode :'copy'
 	tag "$group"
 
 	input:
-		set group, id, type, file(bcfs) from varlo_call_vcf.groupTuple()
+		set group, id, type, slice, file(bcfs) from varlo_call_vcf.groupTuple(by: [0,3])
 
 	output:
-		set group, val(id), file("${group}.varloci.calls.bcf") into calls_bcf, calls_bcf2
+		set group, file("${group}.varloci.${slice}.calls.sort.bcf.gz"), file("${group}.varloci.${slice}.calls.sort.bcf.gz.csi") into combine_bcf
 
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
@@ -932,16 +913,41 @@ process varloci_calling {
 		if (mode == 'paired') {
 			"""
 			source activate py3-env
-			varlociraptor call variants tumor-normal --purity 0.50 --tumor ${bcfs[tumor_idx]} --normal ${bcfs[normal_idx]} > ${group}.varloci.calls.bcf
+			varlociraptor call variants tumor-normal --purity 0.50 --tumor ${bcfs[tumor_idx]} --normal ${bcfs[normal_idx]} > ${group}.varloci.${slice}.calls.bcf
+			bcftools sort ${group}.varloci.${slice}.calls.bcf > ${group}.varloci.${slice}.calls.sort.bcf
+			bgzip ${group}.varloci.${slice}.calls.sort.bcf
+			bcftools index ${group}.varloci.${slice}.calls.sort.bcf.gz
 			"""
 		}
 		else {
 			"""
 			source activate py3-env
-			varlociraptor call variants generic --scenario $params.varlo --obs tumor=$bcfs > ${group}.varloci.calls.bcf
+			varlociraptor call variants generic --scenario $params.varlo --obs tumor=$bcfs > ${group}.varloci.${slice}.calls.bcf
+			bcftools sort ${group}.varloci.${slice}.calls.bcf > ${group}.varloci.${slice}.calls.sort.bcf
+			bgzip ${group}.varloci.${slice}.calls.sort.bcf
+			bcftools index ${group}.varloci.${slice}.calls.sort.bcf.gz
 			"""
 		}
 }
+
+process concatenate_vcfs_varlo {
+	cpus 1
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	time '20m'    
+	tag "$id"
+
+	input:
+		set group, file(vcfs), file(csis) from combine_bcf.groupTuple()
+
+	output:
+		set group, file("${group}.concat.bcf") into filter_varlo
+
+	"""
+	bcftools concat -a $vcfs > tmp.merged.bcf
+	bcftools sort tmp.merged.bcf -O u > ${group}.concat.bcf
+	"""
+}
+
 
 // process  FDR_filtering {
 
