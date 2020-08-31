@@ -623,29 +623,48 @@ process concat_cnv {
 	memory '1GB'
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	time '20m'
+	tag "$group"
 
 	input:
-		set g, file(mantavcf) from manta_vcf
-		set g_c, id_c, type_c, file(cnvkitvcf), tissue_c from cnvkit_vcf.groupTuple().join(meta_cnvkit, by:[0,1])
-		set g_m, id_m, type_m, file(meltvcf), tissue_m from melt_vcf.groupTuple().join(meta_melt, by:[0,1])
+		set group, file(mantavcf) from manta_vcf
+		set g_c, id_c, type_c, file(cnvkitvcf), tissue_c from cnvkit_vcf.join(meta_cnvkit, by:[0,1,2]).groupTuple()
+		set g_m, id_m, type_m, file(meltvcf), tissue_m from melt_vcf.join(meta_melt, by:[0,1,2]).groupTuple()
+
 
 	output:
-		set group, file("${group}.cnvs.vcf") into cnvs
+		file("${group}.cnvs.agg.vcf") into cnvs
 	
 	script:
 	
 	if (mode == 'paired') {
-		tumor_idx = type_c.findIndexOf{ it == 'tumor' || it == 'T' }
+		tumor_idx_c = type_c.findIndexOf{ it == 'tumor' || it == 'T' }
+		tumor_idx_m = type_m.findIndexOf{ it == 'tumor' || it == 'T' }
 		normal_idx_c = type_c.findIndexOf{ it == 'normal' || it == 'N' }
 		normal_idx_m = type_m.findIndexOf{ it == 'normal' || it == 'N' }
-		if (tissue_c[tumor_idx] == 'ffpe') {
-			cnvkit_vcf = cnvkitvcf[normal_idx_c]
+		if (tissue_c[tumor_idx_c] == 'ffpe') {
+			cnvkitvcf = cnvkitvcf[normal_idx_c]
 			meltvcf = meltvcf[normal_idx_m]
 		}
+		else {
+			cnvkitvcf = cnvkitvcf[tumor_idx_c]
+			meltvcf = meltvcf[tumor_idx_m]
+
+		}
+		"""
+		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf \\
+			--tumor-id ${id_c[tumor_idx_c]} \\
+			--normal-id ${id_c[normal_idx_c]} \\
+			--paired paired \\
+			--sample-order ${id_c[tumor_idx_c]},${id_c[normal_idx_c]} > ${group}.cnvs.agg.vcf
+		"""
 	}
-	"""
-	vcf-concat $mantavcf $cnvkitvcf $meltvcf | vcf-sort -c > ${group}.cnvs.vcf
-	"""
+	else {
+		"""
+		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf > ${group}.cnvs.agg.vcf
+		"""
+		
+	}
+
 }
 
 process aggregate_vcfs {
@@ -657,6 +676,7 @@ process aggregate_vcfs {
 	input:
 		set group, vc, file(vcfs) from concatenated_vcfs.mix(vcf_pindel).groupTuple()
 		set g, id, type, tissue from meta_aggregate.groupTuple()
+		file(cnvs) from cnvs.ifEmpty("nocnvs")
 
 	output:
 		set group, file("${group}.agg.vcf") into vcf_pon, vcf_done
@@ -668,10 +688,18 @@ process aggregate_vcfs {
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			sample_order = id[tumor_idx]+","+id[normal_idx]
 		}
+		if (params.assay == 'myeloid') {
+			"""
+			aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
+			"""
+		}
+		else {
+			"""
+			aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.tmp.vcf
+			vcf-concat ${group}.agg.tmp.vcf $cnvs | vcf-sort -c > ${group}.agg.vcf
+			"""
+		}
 
-		"""
-		aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
-		"""
 }
 
 process pon_filter {
