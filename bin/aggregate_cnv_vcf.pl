@@ -87,7 +87,7 @@ sub aggregate_vcfs {
         my $type = $var->{INFO}->{SVTYPE};
         my $end = $var->{INFO}->{END};
         my $len = $var->{INFO}->{SVLEN};
-		if ($vc eq 'MELT') {$len = $end - $var->{POS} -1; }
+		if ($vc eq 'MELT' || $vc eq 'Delly') {$len = $end - $var->{POS} -1; }
 	    $var->{INFO} = {};
 	    $var->{INFO_order} = [];
 	    
@@ -213,6 +213,30 @@ sub fix_gt {
 
 		}
 	}
+    elsif( $vc eq "Delly") {
+		
+		for my $gt ( @{$var->{GT}} ) {
+            my $af = 0;
+            my $altc = 0;
+            my $depth = 0;
+            if ($gt->{RV} == 0) {
+                $af = sprintf "%.3f", $gt->{DV} / ($gt->{DR}+$gt->{DV});
+                $altc = $gt->{DV};
+                $depth = ($gt->{DV}+$gt->{DR});
+            }
+            else {
+                $af = sprintf "%.3f", $gt->{RV} / ($gt->{RV}+$gt->{RR});
+                $altc = $gt->{RV};
+                $depth = ($gt->{RV}+$gt->{RR});
+            }
+            
+			add_gt( $var, $gt->{_sample_id}, "GT", $gt->{GT});
+			add_gt( $var, $gt->{_sample_id}, "VAF", $af );
+			add_gt( $var, $gt->{_sample_id}, "VD", $altc );
+			add_gt( $var, $gt->{_sample_id}, "DP", $depth );
+
+		}
+	}
 }
 
 sub check_options {
@@ -279,7 +303,12 @@ sub which_variantcaller{
 	return "CNVkit" if $meta->{source} =~ /CNVkit/;
 	return "manta" if $meta->{source} =~ /GenerateSVCandidates/;
 	return "MELT" if $meta->{source} =~ /MELT/;
+    #return "Delly" if $meta->{source} =~ //;
     }
+    else {
+        return "Delly" if $meta->{FILTER}->{PASS}->{Description} =~ /All filters passed/;
+    } 
+    
 
     return "unknown";
 }

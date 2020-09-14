@@ -213,7 +213,7 @@ process sentieon_qc {
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt
+		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt, bam_delly
 		set id, type, file("${id}_${type}.QC") into qc_cdm
 		set group, id, type, file("${id}_${type}.QC") into qc_melt
 
@@ -499,6 +499,7 @@ process concatenate_vcfs {
 
 
 process cnvkit {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 1
 	time '1h'
 	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
@@ -528,6 +529,7 @@ process cnvkit {
 }
 
 process melt {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 2
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 	memory '10 GB'
@@ -563,6 +565,7 @@ process melt {
 
 // MANTA SINGLE AND PAIRED
 process manta {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 16
 	time '10h'
 	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
@@ -618,6 +621,47 @@ process manta {
 		}
 }
 
+// Delly SINGLE AND PAIRED
+process delly {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus 16
+	time '10h'
+	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
+	tag "$group"
+	
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_delly.groupTuple()
+
+	output:
+		set group, file("${group}.delly.filtered.vcf") into delly_vcf
+
+	when:
+		params.manta
+	
+	script:
+		if(mode == "paired") { 
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			normal = bam[normal_idx]
+			normal_id = id[normal_idx]
+			tumor = bam[tumor_idx]
+			tumor_id = id[tumor_idx]
+
+			"""
+			delly call -g $genome -o ${group}.delly.bcf $tumor $normal
+			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
+			filter_delly.pl ${group}.delly.vcf > ${group}.delly.filtered.vcf
+			"""
+		}
+		else {
+			"""
+			delly call -g $genome -o ${group}.delly.bcf $tumor
+			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
+			filter_delly.pl ${group}.delly.vcf > ${group}.delly.filtered.vcf
+			"""
+		}
+}
+
 process concat_cnv {
 	cpus 1
 	memory '1GB'
@@ -627,6 +671,7 @@ process concat_cnv {
 
 	input:
 		set group, file(mantavcf) from manta_vcf
+		set group, file(dellyvcf) from delly_vcf
 		set g_c, id_c, type_c, file(cnvkitvcf), tissue_c from cnvkit_vcf.join(meta_cnvkit, by:[0,1,2]).groupTuple()
 		set g_m, id_m, type_m, file(meltvcf), tissue_m from melt_vcf.join(meta_melt, by:[0,1,2]).groupTuple()
 
@@ -651,7 +696,7 @@ process concat_cnv {
 
 		}
 		"""
-		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf \\
+		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf,$dellyvcf \\
 			--tumor-id ${id_c[tumor_idx_c]} \\
 			--normal-id ${id_c[normal_idx_c]} \\
 			--paired paired \\
@@ -660,7 +705,7 @@ process concat_cnv {
 	}
 	else {
 		"""
-		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf > ${group}.cnvs.agg.vcf
+		aggregate_cnv_vcf.pl --vcfs $mantavcf,$cnvkitvcf,$meltvcf,$dellyvcf > ${group}.cnvs.agg.vcf
 		"""
 		
 	}
