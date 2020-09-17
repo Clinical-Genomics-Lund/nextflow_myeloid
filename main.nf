@@ -650,14 +650,14 @@ process delly {
 			"""
 			delly call -g $genome -o ${group}.delly.bcf $tumor $normal
 			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
-			filter_delly.pl ${group}.delly.vcf > ${group}.delly.filtered.vcf
+			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
 			"""
 		}
 		else {
 			"""
-			delly call -g $genome -o ${group}.delly.bcf $tumor
+			delly call -g $genome -o ${group}.delly.bcf $bam
 			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
-			filter_delly.pl ${group}.delly.vcf > ${group}.delly.filtered.vcf
+			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
 			"""
 		}
 }
