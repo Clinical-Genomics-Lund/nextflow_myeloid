@@ -624,7 +624,7 @@ process manta {
 // Delly SINGLE AND PAIRED
 process delly {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-	cpus 16
+	cpus 2
 	time '10h'
 	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
 	tag "$group"
@@ -648,14 +648,14 @@ process delly {
 			tumor_id = id[tumor_idx]
 
 			"""
-			delly call -g $genome -o ${group}.delly.bcf $tumor $normal
+			delly call -g $genome_file -o ${group}.delly.bcf $tumor $normal
 			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
 			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
 			"""
 		}
 		else {
 			"""
-			delly call -g $genome -o ${group}.delly.bcf $bam
+			delly call -g $genome_file -o ${group}.delly.bcf $bam
 			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
 			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
 			"""
@@ -752,6 +752,7 @@ process pon_filter {
 	cpus 1
 	time '1h'
 	tag "$group"
+	memory '32 GB'
 
 	input:
 		set group, file(vcf) from vcf_pon
@@ -761,16 +762,23 @@ process pon_filter {
 		set group, file("${group}.agg.pon.vcf") into vcf_vep
 
 	script:
-		def pons = []
-		if( params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
-		if( params.vardict )   { pons.push("vardict="+params.PON_vardict) }
-		if( params.tnscope )   { pons.push("tnscope="+params.PON_tnscope) }
-		def pons_str = pons.join(",")
-		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+	if (params.assay == 'myeloid') {
+			def pons = []
+			if( params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
+			if( params.vardict )   { pons.push("vardict="+params.PON_vardict) }
+			if( params.tnscope )   { pons.push("tnscope="+params.PON_tnscope) }
+			def pons_str = pons.join(",")
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 
-	"""
-	filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
-	"""
+		"""
+		filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
+		"""
+	}
+	else if (params.assay == 'ovarian') {
+		"""
+		vcfanno_linux64 -lua /fs1/resources/ref/hg19/bed/scout/sv_tracks/silly.lua $params.vcfanno $vcf > ${group}.agg.pon.vcf
+		"""
+	}
 }
 
 process annotate_vep {
