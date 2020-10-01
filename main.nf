@@ -84,6 +84,9 @@ process bwa_umi {
 	errorStrategy 'retry'
 	maxErrors 5
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(r1), file(r2) from fastq_umi
@@ -165,6 +168,9 @@ process markdup {
 	memory '64 GB'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
     
 	input:
 		set group, id, type, file(bam), file(bai) from bam_markdup.mix(bam_umi_markdup)
@@ -187,6 +193,9 @@ process bqsr_umi {
 	memory '16 GB'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
@@ -208,6 +217,9 @@ process sentieon_qc {
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true', pattern: '*.QC*'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
@@ -504,6 +516,9 @@ process cnvkit {
 	time '1h'
 	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 	
 	input:
 		set gr, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV),g ,vc, file(vcf) from bam_cnvkit.join(qc_cnvkit_val, by:[0,1]) \
@@ -534,6 +549,9 @@ process melt {
 	container = '/fs1/resources/containers/container_twist-brca.sif'
 	memory '10 GB'
 	tag "$group"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from bam_melt \
@@ -570,6 +588,9 @@ process manta {
 	time '10h'
 	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
 	tag "$group"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 	
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta.groupTuple()
@@ -625,10 +646,10 @@ process manta {
 process delly {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 2
-	time '10h'
+	time '20h'
 	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
 	tag "$group"
-	
+		
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_delly.groupTuple()
 
