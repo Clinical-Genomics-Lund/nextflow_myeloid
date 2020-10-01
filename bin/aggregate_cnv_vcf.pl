@@ -88,6 +88,7 @@ sub aggregate_vcfs {
         my $end = $var->{INFO}->{END};
         my $len = $var->{INFO}->{SVLEN};
 		if ($vc eq 'MELT' || $vc eq 'Delly') {$len = $end - $var->{POS} -1; }
+        if ($type eq 'INS') { $len = 1; }
 	    $var->{INFO} = {};
 	    $var->{INFO_order} = [];
 	    
