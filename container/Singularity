@@ -1,5 +1,5 @@
 Bootstrap:docker
-From:nfcore/base
+From:nfcore/base:1.8
 
 %labels
 	MAINTAINER Björn Hallström <bjorn.hallstrom@skane.se>
@@ -11,19 +11,28 @@ From:nfcore/base
 	PICARD_HOME=/opt/conda/envs/CMD-twist/share/picard-2.18.26-0/
 	PERL5LIB=$PERL5LIB:/opt/conda/envs/CMD-twist/lib/site_perl/5.26.2/
 	export JAVA_HOME=/opt/conda/envs/CMD-twist
+	umask 0002
 %files
-        environment.yml /
-        environment_samtools.yml /
+	environment.yml /
+	environment_samtools.yml /
 	environment_py3.yml /
-        /data/bnf/scripts/postaln_qc.pl /usr/local/bin
+	environment_java8.yml /
+	/data/bnf/scripts/postaln_qc.pl /usr/local/bin
 	/data/bnf/sw/sentieon/sentieon-genomics-201911 /opt
+	/data/bnf/sw/melt/MELTv2.1.5/MELT.jar /opt/
+	
 %post
-        rm -rf /var/lib/apt/lists/*
-        apt -y clean
-        apt -y update
+	mkdir /usr/share/man/man1/
+	rm -rf /var/lib/apt/lists/*
+	apt -y clean
+	apt -y update
 	apt -y install build-essential make
+	#apt -y install montage
+	apt -y install graphicsmagick-imagemagick-compat
+	
 
 	/opt/conda/bin/conda env create -f /environment.yml
+	/opt/conda/bin/conda env create -f /environment_java8.yml
 	/opt/conda/bin/conda env create -f /environment_samtools.yml
 	/opt/conda/bin/conda env create -f /environment_py3.yml python=3
 	/opt/conda/bin/conda clean -a
@@ -34,4 +43,8 @@ From:nfcore/base
 	cd qc_sentieon
 	git checkout c453713628a52125e72f5cadb7a0d1a44b058132
 	cp qc_sentieon.pl /opt/conda/bin/.
-		
+
+	cd / && git clone https://github.com/J35P312/SVDB
+	cd SVDB && git checkout 2.2.0
+	/opt/conda/envs/CMD-twist/bin/pip install --editable .
+
