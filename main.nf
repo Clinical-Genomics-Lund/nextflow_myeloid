@@ -810,7 +810,7 @@ process coyote {
 		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/myeloid/vcf/${vcf} --id $group --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
 
