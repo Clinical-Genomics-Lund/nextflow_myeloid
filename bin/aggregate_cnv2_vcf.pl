@@ -203,28 +203,16 @@ sub fix_gt {
 	}
     ## CNVkit is called on read depth, to represent in coyote, artifically set read counts for alt and ref, and VAF. NOT TRUE CALL VALUES!! Lowest prio (only solely called by cnvkit ends up here)
     elsif( $vc eq "CNVkit" ) {
-		if ($opt{paired} eq 'paired') {
-			my %tmp = ( 'GT' => '0/0', 'CN'=> '2', '_sample_id'=> 'dummy');
-			my @tmp = split /\./, $var->{GT}->[0]->{_sample_id};
-			
-			if ( $tmp[1] eq $opt{'tumor-id'} ) {
-				$tmp{_sample_id} = $opt{'normal-id'}; 
-				$var->{GT}->[0]->{_sample_id} = $opt{'tumor-id'};
-			}
-			else {
-				$tmp{_sample_id} = $opt{'tumor-id'};
-				$var->{GT}->[0]->{_sample_id} = $opt{'normal-id'};
-			}
-			push @{$var->{GT}},\%tmp;
-		}
         
 		for my $gt ( @{$var->{GT}} ) {
-            my $cnum = "0.5";
-            if ($gt->{CN}) { $cnum = $gt->{CN}; }
+            my $vaf = 0.5;
+            my $vd = 100;
+            my $dp = 100;
+            if ($gt->{GT} eq "./.") { $vaf = 0; $dp = 0; $vd = 0; }
 			add_gt( $var, $gt->{_sample_id}, "GT", $gt->{GT});
-			add_gt( $var, $gt->{_sample_id}, "VAF", "0.5" );
-			add_gt( $var, $gt->{_sample_id}, "VD", "100");
-			add_gt( $var, $gt->{_sample_id}, "DP", "100");
+			add_gt( $var, $gt->{_sample_id}, "VAF", $vaf );
+			add_gt( $var, $gt->{_sample_id}, "VD", $vd );
+			add_gt( $var, $gt->{_sample_id}, "DP", $dp );
 
 		}
     }
