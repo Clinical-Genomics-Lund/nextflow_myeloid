@@ -53,7 +53,7 @@ Channel
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type, (row.containsKey("ffpe") ? row.ffpe : false)) }
-    .into { meta_aggregate; meta_germline; meta_pon; meta_cnvkit; meta_melt }
+    .into { meta_aggregate; meta_germline; meta_pon; meta_cnvkit; meta_melt; meta_cnvplot }
 
 Channel
     .fromPath(params.csv).splitCsv(header:true)
@@ -345,8 +345,9 @@ process freebayes {
 
 process vardict {
 	cpus 1
-	time '40m'
+	time '2h'
 	tag "$group"
+	memory '15GB'
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_vardict.groupTuple()
@@ -515,7 +516,6 @@ process concatenate_vcfs {
 
 process cnvkit {
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true, pattern: '*.vcf'
-	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true, pattern: '*.png'
 	cpus 1
 	time '1h'
 	tag "$id"
@@ -528,9 +528,8 @@ process cnvkit {
 			.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
-		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
-		set gr, id, type, file("${gr}.${id}.filtered.vcf") into cnvkit_vcf
-		set file("${gr}.${id}.call.cns"), file("results/*.cnr"), file("${gr}.${id}.filtered") into tmp_cnvkit
+		set gr, id, type, file("${gr}.${id}.cnvkit_overview.png"), file("${gr}.${id}.call.cns"), file("${gr}.${id}.cnr"), file("${gr}.${id}.filtered") into geneplot_cnvkit
+		set gr, id, type, file("${gr}.${id}.filtered.vcf") into cnvkit_vcf 
 
 	when:
 		params.cnvkit
@@ -538,28 +537,46 @@ process cnvkit {
 	script:
 		freebayes_idx = vc.findIndexOf{ it == 'freebayes' }
 
-	if (params.assay == 'myeloid') {
-		"""
-		cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
-		cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
-		filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
-		cnvkit.py export vcf ${gr}.${id}.filtered -i "$id" > ${gr}.${id}.filtered.vcf		
-		cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
-		"""
-	}
-	else if (params.assay == 'ovarian') {
-		"""
-		cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
-		cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
-		filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
-		cnvkit.py export vcf ${gr}.${id}.filtered -i "$id" > ${gr}.${id}.filtered.vcf		
-		cnvkit.py scatter -s results/*.cn{s,r} -o overviewplot.png -v ${vcf[freebayes_idx]} -i $id
-		cnvkit.py scatter -s ${gr}.${id}.call.cns results/*.cnr -c 13:32165479-32549672 -o brca2.png --title 'BRCA2'
-		cnvkit.py scatter -s ${gr}.${id}.call.cns results/*.cnr -c 17:42894294-43350132 -o brca1.png --title 'BRCA1'
-		montage -mode concatenate -tile 1x *.png ${gr}.${id}.cnvkit.png
-		"""		
+	"""
+	cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
+	cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
+	filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
+	cnvkit.py export vcf ${gr}.${id}.filtered -i "$id" > ${gr}.${id}.filtered.vcf		
+	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit_overview.png -v ${vcf[freebayes_idx]} -i $id
+	cp results/*.cnr ${gr}.${id}.cnr
+	"""
+}
 
-	}
+// Plot specific gene-regions. CNVkit 0.9.6 and forward introduced a bug in region plot, use 0.9.5 (091 wrong name, container has 0.9.5)
+process gene_plot {
+	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true, pattern: '*.png'
+	cpus 1
+	container = '/fs1/resources/containers/cnvkit91_montage.sif'
+	time '5m'
+	tag "$id"
+
+	input:
+		set gr, id, type, file(overview), file(cns), file(cnr), file(filtered) from geneplot_cnvkit
+
+	output:
+		set gr, id, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
+
+	script:
+
+		if (params.assay == "ovarian") {
+			"""
+			cnvkit.py scatter -s $cns $cnr -c 13:32165479-32549672 -o brca2.png --title 'BRCA2'
+			cnvkit.py scatter -s $cns $cnr -c 17:42894294-43350132 -o brca1.png --title 'BRCA1'
+			montage -mode concatenate -tile 1x *.png ${gr}.${id}.cnvkit.png
+			"""		
+		}
+		else {
+			"""
+			mv ${gr}.${id}.cnvkit_overview.png ${gr}.${id}.cnvkit.png
+			"""
+		}
+
+
 }
 
 process melt {
@@ -949,7 +966,8 @@ process coyote {
 	input:
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
-		set g2, cnv_type, file(cnvplot) from cnvplot_coyote.groupTuple()
+		set g2, id, cnv_type, file(cnvplot), tissue_c from cnvplot_coyote.join(meta_cnvplot, by:[0,1,2]).groupTuple()
+
 
 	output:
 		file("${group}.coyote")
@@ -960,9 +978,14 @@ process coyote {
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx_cnv = cnv_type.findIndexOf{ it == 'normal' || it == 'N' }
+		cnv_index = tumor_idx_cnv
+		if (tissue_c == 'ffpe' || 'FFPE') {
+			cnv_index = normal_idx_cnv
+		}
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/${params.assay}/vcf/${vcf} --id ${group} --cnv /access/${params.assay}/plots/${cnvplot[cnv_index]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
 
