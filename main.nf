@@ -230,6 +230,8 @@ process qc_to_cdm {
 	cpus 1
 	publishDir "${CRONDIR}/qc", mode: 'copy' , overwrite: 'true'
 	tag "$id"
+	time '10m'
+	memory '50 MB'
 
 	input:
 		set id, type, file(qc), r1, r2 from qc_cdm.join(meta_qc)
