@@ -530,6 +530,7 @@ process cnvkit {
 	output:
 		set gr, id, type, file("${gr}.${id}.cnvkit_overview.png"), file("${gr}.${id}.call.cns"), file("${gr}.${id}.cnr"), file("${gr}.${id}.filtered") into geneplot_cnvkit
 		set gr, id, type, file("${gr}.${id}.filtered.vcf") into cnvkit_vcf 
+		file("${gr}.${id}.cns") into cns_notcalled
 
 	when:
 		params.cnvkit
@@ -544,6 +545,7 @@ process cnvkit {
 	cnvkit.py export vcf ${gr}.${id}.filtered -i "$id" > ${gr}.${id}.filtered.vcf		
 	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit_overview.png -v ${vcf[freebayes_idx]} -i $id
 	cp results/*.cnr ${gr}.${id}.cnr
+	cp results/*.cns ${gr}.${id}.cns
 	"""
 }
 
