@@ -65,6 +65,11 @@ Channel
     .map{ row-> tuple(row.id, row.read1, row.read2) }
     .set{ meta_qc }
 
+Channel
+    .fromPath(params.csv).splitCsv(header:true)
+    .map{ row-> tuple(row.group, row.id, row.type, row.clarity_sample_id, row.clarity_pool_id) }
+    .set { meta_const }
+
 
 
 // Split bed file in to smaller parts to be used for parallel variant calling
@@ -210,6 +215,34 @@ process bqsr_umi {
 	"""
 }
 
+process bqsr_to_constitutional {
+	cpus params.cpu_some
+	memory '16 GB'
+	time '1h'
+	tag "$id"
+	publishDir "${OUTDIR}/bqsr", mode: 'copy', overwrite: true, pattern: '*.bqsr*'
+	publishDir "${OUTDIR}/csv", mode: 'copy', overwrite: true, pattern: '*.csv*'
+	//scratch true
+	//stageInMode 'copy'
+	//stageOutMode 'copy'
+
+	when:
+		mode == "paired"
+
+	input:
+		set group, id, type, file(bam), file(bai), cid, poolid from bam_bqsr.join(meta_const, by: [0,1,2]).filter{ item -> item[2] == 'N'}
+
+	output:
+		set group, id, type, file(bam), file(bai), file("${id}.const.bqsr") into input_const
+		file("${id}.const.csv") into csv_const
+
+	"""
+	sentieon driver -t ${task.cpus} -r $genome_file -i $bam --algo QualCal ${id}.const.bqsr
+	cat $params.const_csv_template > ${id}.const.csv
+	echo $cid,$id,proband,oncov1-0,M,ovarian-normal,affected,$group,,,$poolid,illumina,${OUTDIR}/bam/$bam,${OUTDIR}/bqsr/${id}.const.bqsr,,screening >> ${id}.const.csv
+	"""
+	
+}
 
 process sentieon_qc {
 	cpus params.cpu_many
@@ -228,6 +261,7 @@ process sentieon_qc {
 		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt, bam_delly
 		set id, type, file("${id}_${type}.QC") into qc_cdm
 		set group, id, type, file("${id}_${type}.QC") into qc_melt
+		file("*.txt")
 
 	"""
 	sentieon driver \\
