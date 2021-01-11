@@ -162,7 +162,7 @@ process markdup {
 
 	output:
 		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai") into bam_bqsr
-		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc
+		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_lowcov
 
 	"""
 	sentieon driver -t ${task.cpus} -i $bam --algo LocusCollector --fun score_info score.gz
@@ -222,6 +222,26 @@ process sentieon_qc {
 	cp is_metrics.txt ${id}_is_metrics.txt
 
 	qc_sentieon.pl ${id}_${type} panel > ${id}_${type}.QC
+	"""
+}
+
+process lowcov {
+	cpus 1
+	memory '5 GB'
+	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
+	time '1h'
+	tag "$id"
+
+	input:
+		set group, id, type, file(bam), file(bai), file(dedup) from bam_lowcov
+
+
+	output:
+		set group, type, file("${id}.lowcov.bed") into lowcov_coyote
+
+	"""
+	panel_depth.pl $bam $params.regions_proteincoding > lowcov.bed
+	overlapping_genes.pl lowcov.bed $params.gene_regions > ${id}.lowcov.bed
 	"""
 }
 
@@ -540,7 +560,7 @@ process melt {
 
 	script:
 
-	 	if (mode == "paired") {
+		if (mode == "paired") {
 			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			tumor_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
@@ -800,6 +820,7 @@ process coyote {
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
 		set g2, cnv_type, file(cnvplot) from cnvplot_coyote.groupTuple()
+		set g3, lowcov_type, file(lowcov) from lowcov_coyote.groupTuple()
 
 	output:
 		file("${group}.coyote")
@@ -810,9 +831,15 @@ process coyote {
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
+		tumor_idx_lowcov = lowcov_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} --cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl \\
+		--group $params.coyote_group \\
+		--vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} \\
+		--cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} \\
+		--lowcov /access/myeloid/QC/${lowcov[tumor_idx_lowcov]} \\
+		--clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
 
