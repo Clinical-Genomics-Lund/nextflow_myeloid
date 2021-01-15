@@ -182,7 +182,7 @@ process markdup {
 
 	output:
 		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai") into bam_bqsr
-		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_bqsr2
+		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_bqsr2, bam_lowcov
 
 	"""
 	sentieon driver -t ${task.cpus} -i $bam --algo LocusCollector --fun score_info score.gz
@@ -281,11 +281,33 @@ process sentieon_qc {
 	"""
 }
 
+process lowcov {
+	cpus 1
+	memory '5 GB'
+	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true'
+	time '1h'
+	tag "$id"
+
+	input:
+		set group, id, type, file(bam), file(bai), file(dedup) from bam_lowcov
+
+
+	output:
+		set group, type, file("${id}.lowcov.bed") into lowcov_coyote
+
+	"""
+	panel_depth.pl $bam $params.regions_proteincoding > lowcov.bed
+	overlapping_genes.pl lowcov.bed $params.gene_regions > ${id}.lowcov.bed
+	"""
+}
+
 // Load QC data into CDM (via middleman)
 process qc_to_cdm {
 	cpus 1
 	publishDir "${CRONDIR}/qc", mode: 'copy' , overwrite: 'true'
 	tag "$id"
+	time '10m'
+	memory '50 MB'
 
 	input:
 		set id, type, file(qc), r1, r2 from qc_cdm.join(meta_qc)
@@ -1004,6 +1026,7 @@ process coyote {
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
 		set g2, id, cnv_type, file(cnvplot), tissue_c from cnvplot_coyote.join(meta_cnvplot, by:[0,1,2]).groupTuple()
+		set g3, lowcov_type, file(lowcov) from lowcov_coyote.groupTuple()
 
 
 	output:
@@ -1023,8 +1046,14 @@ process coyote {
 		else if (tissue_c[tumor_idx_cnv] == 'ffpe' || 'FFPE') {
 			cnv_index = normal_idx_cnv
 		}
+		tumor_idx_lowcov = lowcov_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group --vcf /access/${params.assay}/vcf/${vcf} --id ${group} --cnv /access/${params.assay}/plots/${cnvplot[cnv_index]} --clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group \\
+		--vcf /access/${params.assay}/vcf/${vcf} --id ${group} \\
+		--cnv /access/${params.assay}/plots/${cnvplot[cnv_index]} \\
+		--clarity-sample-id ${lims_id[tumor_idx]} \\
+		--lowcov /access/myeloid/QC/${lowcov[tumor_idx_lowcov]} \\
+		--clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
