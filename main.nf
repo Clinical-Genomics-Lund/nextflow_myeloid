@@ -182,7 +182,7 @@ process markdup {
 
 	output:
 		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai") into bam_bqsr
-		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc
+		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_bqsr2
 
 	"""
 	sentieon driver -t ${task.cpus} -i $bam --algo LocusCollector --fun score_info score.gz
@@ -227,10 +227,10 @@ process bqsr_to_constitutional {
 	//stageOutMode 'copy'
 
 	when:
-		mode == "paired"
+		mode == "neverever"
 
 	input:
-		set group, id, type, file(bam), file(bai), cid, poolid from bam_bqsr.join(meta_const, by: [0,1,2]).filter{ item -> item[2] == 'N'}
+		set group, id, type, file(bam), file(bai), file(dedup), cid, poolid from bam_bqsr2.join(meta_const, by: [0,1,2]).filter{ item -> item[2] == 'N'}
 
 	output:
 		set group, id, type, file(bam), file(bai), file("${id}.const.bqsr") into input_const
@@ -239,7 +239,8 @@ process bqsr_to_constitutional {
 	"""
 	sentieon driver -t ${task.cpus} -r $genome_file -i $bam --algo QualCal ${id}.const.bqsr
 	cat $params.const_csv_template > ${id}.const.csv
-	echo $cid,$id,proband,oncov1-0,M,ovarian-normal,affected,$group,,,$poolid,illumina,${OUTDIR}/bam/$bam,${OUTDIR}/bqsr/${id}.const.bqsr,,screening >> ${id}.const.csv
+	echo $cid,$id,proband,oncov1-0-test,M,ovarian-normal,affected,$id,,,$poolid,illumina,${OUTDIR}/bam/$bam,${OUTDIR}/bqsr/${id}.const.bqsr,,screening >> ${id}.const.csv
+	/fs1/bjorn/bnf-scripts/start_nextflow_analysis.pl ${id}.const.csv
 	"""
 	
 }
