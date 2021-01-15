@@ -622,7 +622,7 @@ process gene_plot {
 
 	script:
 
-		if (params.assay == "ovarian") {
+		if (params.assay == "PARP_inhib") {
 			"""
 			cnvkit.py scatter -s $cns $cnr -c 13:32165479-32549672 -o brca2.png --title 'BRCA2'
 			cnvkit.py scatter -s $cns $cnr -c 17:42894294-43350132 -o brca1.png --title 'BRCA1'
@@ -906,7 +906,8 @@ process pon_filter {
 		filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
 		"""
 	}
-	else if (params.assay == 'ovarian') {
+	// werid placement, no PON for PARP_inhib, Adds enigma-db to vcf. Move to separate process?
+	else if (params.assay == 'PARP_inhib') {
 		"""
 		vcfanno_linux64 -lua /fs1/resources/ref/hg19/bed/scout/sv_tracks/silly.lua $params.vcfanno $vcf > ${group}.agg.pon.vcf
 		"""
@@ -1053,7 +1054,7 @@ process coyote {
 		--vcf /access/${params.assay}/vcf/${vcf} --id ${group} \\
 		--cnv /access/${params.assay}/plots/${cnvplot[cnv_index]} \\
 		--clarity-sample-id ${lims_id[tumor_idx]} \\
-		--lowcov /access/myeloid/QC/${lowcov[tumor_idx_lowcov]} \\
+		--lowcov /access/${params.assay}/QC/${lowcov[tumor_idx_lowcov]} \\
 		--clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
