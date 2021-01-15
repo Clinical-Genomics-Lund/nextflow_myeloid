@@ -836,7 +836,7 @@ process coyote {
 	"""
 	echo "import_myeloid_to_coyote_vep_gms.pl \\
 		--group $params.coyote_group \\
-		--vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} \\
+		--vcf /access/myeloid/vcf/${vcf} --id ${group} \\
 		--cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} \\
 		--lowcov /access/myeloid/QC/${lowcov[tumor_idx_lowcov]} \\
 		--clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
