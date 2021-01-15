@@ -10,6 +10,7 @@ mode = csv.countLines() > 2 ? "paired" : "unpaired"
 println(csv)
 println(mode)
 
+
 workflow.onComplete {
 
 	def msg = """\
@@ -36,6 +37,14 @@ workflow.onComplete {
 	logFile.append(error)
 }
 
+// Print commit-version of active deployment
+file(params.git)
+    .readLines()
+    .each { println "git commit-hash: "+it }
+// Print active container
+container = file(params.container).toRealPath()
+println("container: "+container)
+
 Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.group, row.id, row.type, file(row.read1), file(row.read2)) }
@@ -43,8 +52,8 @@ Channel
 
 Channel
     .fromPath(params.csv).splitCsv(header:true)
-    .map{ row-> tuple(row.group, row.id, row.type) }
-    .into { meta_aggregate; meta_germline; meta_pon }
+    .map{ row-> tuple(row.group, row.id, row.type, (row.containsKey("ffpe") ? row.ffpe : false)) }
+    .into { meta_aggregate; meta_germline; meta_pon; meta_cnvkit; meta_melt; meta_cnvplot }
 
 Channel
     .fromPath(params.csv).splitCsv(header:true)
@@ -55,6 +64,11 @@ Channel
     .fromPath(params.csv).splitCsv(header:true)
     .map{ row-> tuple(row.id, row.read1, row.read2) }
     .set{ meta_qc }
+
+Channel
+    .fromPath(params.csv).splitCsv(header:true)
+    .map{ row-> tuple(row.group, row.id, row.type, row.clarity_sample_id, row.clarity_pool_id) }
+    .set { meta_const }
 
 
 
@@ -75,6 +89,9 @@ process bwa_umi {
 	errorStrategy 'retry'
 	maxErrors 5
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(r1), file(r2) from fastq_umi
@@ -156,13 +173,16 @@ process markdup {
 	memory '64 GB'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
     
 	input:
 		set group, id, type, file(bam), file(bai) from bam_markdup.mix(bam_umi_markdup)
 
 	output:
 		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai") into bam_bqsr
-		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_lowcov
+		set group, id, type, file("${id}.${type}.dedup.bam"), file("${id}.${type}.dedup.bam.bai"), file("dedup_metrics.txt") into bam_qc, bam_bqsr2, bam_lowcov
 
 	"""
 	sentieon driver -t ${task.cpus} -i $bam --algo LocusCollector --fun score_info score.gz
@@ -178,6 +198,9 @@ process bqsr_umi {
 	memory '16 GB'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(bam), file(bai) from bam_umi_bqsr
@@ -192,6 +215,35 @@ process bqsr_umi {
 	"""
 }
 
+process bqsr_to_constitutional {
+	cpus params.cpu_some
+	memory '16 GB'
+	time '1h'
+	tag "$id"
+	publishDir "${OUTDIR}/bqsr", mode: 'copy', overwrite: true, pattern: '*.bqsr*'
+	publishDir "${OUTDIR}/csv", mode: 'copy', overwrite: true, pattern: '*.csv*'
+	//scratch true
+	//stageInMode 'copy'
+	//stageOutMode 'copy'
+
+	when:
+		mode == "neverever"
+
+	input:
+		set group, id, type, file(bam), file(bai), file(dedup), cid, poolid from bam_bqsr2.join(meta_const, by: [0,1,2]).filter{ item -> item[2] == 'N'}
+
+	output:
+		set group, id, type, file(bam), file(bai), file("${id}.const.bqsr") into input_const
+		file("${id}.const.csv") into csv_const
+
+	"""
+	sentieon driver -t ${task.cpus} -r $genome_file -i $bam --algo QualCal ${id}.const.bqsr
+	cat $params.const_csv_template > ${id}.const.csv
+	echo $cid,$id,proband,oncov1-0-test,M,ovarian-normal,affected,$id,,,$poolid,illumina,${OUTDIR}/bam/$bam,${OUTDIR}/bqsr/${id}.const.bqsr,,screening >> ${id}.const.csv
+	/fs1/bjorn/bnf-scripts/start_nextflow_analysis.pl ${id}.const.csv
+	"""
+	
+}
 
 process sentieon_qc {
 	cpus params.cpu_many
@@ -199,14 +251,18 @@ process sentieon_qc {
 	publishDir "${OUTDIR}/QC", mode: 'copy', overwrite: 'true', pattern: '*.QC*'
 	time '1h'
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 
 	input:
 		set group, id, type, file(bam), file(bai), file(dedup) from bam_qc
 
 	output:
-		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt
+		set group, id, type, file(bam), file(bai), file("${id}_is_metrics.txt") into all_pindel, bam_manta, bam_melt, bam_delly
 		set id, type, file("${id}_${type}.QC") into qc_cdm
 		set group, id, type, file("${id}_${type}.QC") into qc_melt
+		file("*.txt")
 
 	"""
 	sentieon driver \\
@@ -346,8 +402,9 @@ process freebayes {
 
 process vardict {
 	cpus 1
-	time '40m'
+	time '2h'
 	tag "$group"
+	memory '15GB'
 
 	input:
 		set group, id, type, file(bams), file(bais), file(bqsr) from bam_vardict.groupTuple()
@@ -515,18 +572,22 @@ process concatenate_vcfs {
 
 
 process cnvkit {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true, pattern: '*.vcf'
 	cpus 1
 	time '1h'
-	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true
 	tag "$id"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 	
 	input:
 		set gr, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV),g ,vc, file(vcf) from bam_cnvkit.join(qc_cnvkit_val, by:[0,1]) \
 			.combine(vcf_cnvkit.filter { item -> item[1] == 'freebayes' })
 		
 	output:
-		set gr, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
-		set gr, id, type, file("${gr}.${id}.filtered") into cnvkit_vcf
+		set gr, id, type, file("${gr}.${id}.cnvkit_overview.png"), file("${gr}.${id}.call.cns"), file("${gr}.${id}.cnr"), file("${gr}.${id}.filtered") into geneplot_cnvkit
+		set gr, id, type, file("${gr}.${id}.filtered.vcf") into cnvkit_vcf 
+		file("${gr}.${id}.cns") into cns_notcalled
 
 	when:
 		params.cnvkit
@@ -538,51 +599,72 @@ process cnvkit {
 	cnvkit.py batch $bam -r $params.cnvkit_reference -d results/
 	cnvkit.py call results/*.cns -v $vcf -o ${gr}.${id}.call.cns
 	filter_cnvkit.pl ${gr}.${id}.call.cns $MEAN_DEPTH > ${gr}.${id}.filtered
-	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit.png -v ${vcf[freebayes_idx]} -i $id
+	cnvkit.py export vcf ${gr}.${id}.filtered -i "$id" > ${gr}.${id}.filtered.vcf		
+	cnvkit.py scatter -s results/*.cn{s,r} -o ${gr}.${id}.cnvkit_overview.png -v ${vcf[freebayes_idx]} -i $id
+	cp results/*.cnr ${gr}.${id}.cnr
+	cp results/*.cns ${gr}.${id}.cns
 	"""
 }
 
-process melt {
-	cpus 16
-	container = '/fs1/resources/containers/container_twist-brca.sif'
-	memory '10 GB'
-	tag "$group"
+// Plot specific gene-regions. CNVkit 0.9.6 and forward introduced a bug in region plot, use 0.9.5 (091 wrong name, container has 0.9.5)
+process gene_plot {
+	publishDir "${OUTDIR}/plots", mode: 'copy', overwrite: true, pattern: '*.png'
+	cpus 1
+	container = '/fs1/resources/containers/cnvkit91_montage.sif'
+	time '5m'
+	tag "$id"
 
 	input:
-		set group, id, type, file(bam), file(bai), file(bqsr) from bam_melt.groupTuple()
-		set group, id_qc, type_qc, val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from qc_melt_val.groupTuple()
+		set gr, id, type, file(overview), file(cns), file(cnr), file(filtered) from geneplot_cnvkit
 
+	output:
+		set gr, id, type, file("${gr}.${id}.cnvkit.png") into cnvplot_coyote
+
+	script:
+
+		if (params.assay == "PARP_inhib") {
+			"""
+			cnvkit.py scatter -s $cns $cnr -c 13:32165479-32549672 -o brca2.png --title 'BRCA2'
+			cnvkit.py scatter -s $cns $cnr -c 17:42894294-43350132 -o brca1.png --title 'BRCA1'
+			montage -mode concatenate -tile 1x *.png ${gr}.${id}.cnvkit.png
+			"""		
+		}
+		else {
+			"""
+			mv ${gr}.${id}.cnvkit_overview.png ${gr}.${id}.cnvkit.png
+			"""
+		}
+
+
+}
+
+process melt {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus 2
+	//container = '/fs1/resources/containers/container_twist-brca.sif'
+	memory '10 GB'
+	tag "$group"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
+
+
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr), val(INS_SIZE), val(MEAN_DEPTH), val(COV_DEV) from bam_melt \
+			.join(qc_melt_val, by: [0,1,2])
+		
 	when:
 		params.melt
 
 	output:
-		set group, file("${sid}.melt.merged.vcf") into melt_vcf
+		set group, id, type, file("${id}.melt.merged.vcf") into melt_vcf
 
-	script:
-
-		if (mode == "paired") {
-			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-			tumor_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
-			normal_qc_idx = type_qc.findIndexOf{ it == 'normal' || it == 'N' }
-			bamn = bam[normal_idx]
-			idn = id[normal_idx]
-			MD = MEAN_DEPTH[normal_qc_idx]
-			CD = COV_DEV[normal_qc_idx]
-			IS = INS_SIZE[normal_qc_idx]
-			sid = id[normal_idx]
-		}
-		else {
-			bamn = bam
-			MD = MEAN_DEPTH
-			CD = COV_DEV
-			IS = INS_SIZE
-			sid = id
-		}
-		
 	"""
+	set +eu
+	source activate java8-env
+	set -eu
 	java -jar  /opt/MELT.jar Single \\
-		-bamfile $bamn \\
+		-bamfile $bam \\
 		-r 150 \\
 		-h $genome_file \\
 		-n $params.bed_melt \\
@@ -590,20 +672,25 @@ process melt {
 		-d 50 -t $params.mei_list \\
 		-w . \\
 		-b 1/2/3/4/5/6/7/8/9/10/11/12/14/15/16/18/19/20/21/22 \\
-		-c $MD \\
-		-cov $CD \\
-		-e $IS
-	merge_melt.pl $params.meltheader $sid
+		-c $MEAN_DEPTH \\
+		-cov $COV_DEV \\
+		-e $INS_SIZE
+	source deactivate
+	merge_melt.pl $params.meltheader $id
 	"""
 
 }
 
 // MANTA SINGLE AND PAIRED
 process manta {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
 	cpus 16
 	time '10h'
-	container = '/fs1/resources/containers/wgs_2020-03-25.sif'
+	//container = '/fs1/resources/containers/wgs_2020-03-25.sif'
 	tag "$group"
+	scratch true
+	stageInMode 'copy'
+	stageOutMode 'copy'
 	
 	input:
 		set group, id, type, file(bam), file(bai), file(bqsr) from bam_manta.groupTuple()
@@ -655,6 +742,108 @@ process manta {
 		}
 }
 
+// Delly SINGLE AND PAIRED
+process delly {
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	cpus 2
+	time '20h'
+	//container = '/fs1/resources/containers/wgs_2020-03-25.sif'
+	tag "$group"
+		
+	input:
+		set group, id, type, file(bam), file(bai), file(bqsr) from bam_delly.groupTuple()
+
+	output:
+		set group, file("${group}.delly.filtered.vcf") into delly_vcf
+
+	when:
+		params.manta
+	
+	script:
+		if(mode == "paired") { 
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
+			normal = bam[normal_idx]
+			normal_id = id[normal_idx]
+			tumor = bam[tumor_idx]
+			tumor_id = id[tumor_idx]
+
+			"""
+			delly call -g $genome_file -o ${group}.delly.bcf $tumor $normal
+			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
+			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
+			"""
+		}
+		else {
+			"""
+			delly call -g $genome_file -o ${group}.delly.bcf $bam
+			bcftools view ${group}.delly.bcf > ${group}.delly.vcf
+			filter_delly.pl --vcf ${group}.delly.vcf --bed $params.regions_bed > ${group}.delly.filtered.vcf
+			"""
+		}
+}
+
+process concat_cnv {
+	cpus 1
+	memory '1GB'
+	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
+	//container = '/fs1/resources/containers/wgs_2020-03-25.sif'
+	time '20m'
+	tag "$group"
+
+	input:
+		set group, file(mantavcf) from manta_vcf
+		set group, file(dellyvcf) from delly_vcf
+		set g_c, id_c, type_c, file(cnvkitvcf), tissue_c from cnvkit_vcf.join(meta_cnvkit, by:[0,1,2]).groupTuple()
+		set g_m, id_m, type_m, file(meltvcf), tissue_m from melt_vcf.join(meta_melt, by:[0,1,2]).groupTuple()
+
+
+	output:
+		file("${group}.cnvs.agg.vcf") into cnvs
+	
+	script:
+	
+	if (mode == 'paired') {
+		tumor_idx_c = type_c.findIndexOf{ it == 'tumor' || it == 'T' }
+		tumor_idx_m = type_m.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx_c = type_c.findIndexOf{ it == 'normal' || it == 'N' }
+		normal_idx_m = type_m.findIndexOf{ it == 'normal' || it == 'N' }
+		if (tissue_c[tumor_idx_c] == 'ffpe') {
+			cnvkitvcf = cnvkitvcf[normal_idx_c]
+			meltvcf = meltvcf[normal_idx_m]
+		}
+		else {
+			cnvkitvcf = cnvkitvcf[tumor_idx_c]
+			meltvcf = meltvcf[tumor_idx_m]
+
+		}
+		tmp = mantavcf.collect {it + ':manta ' } + dellyvcf.collect {it + ':delly ' } + cnvkitvcf.collect {it + ':cnvkit ' }
+		vcfs = tmp.join(' ')
+		"""
+		set +eu
+		source activate py3-env
+		svdb --merge --vcf $vcfs --no_intra --pass_only --bnd_distance 2500 --overlap 0.7 --priority manta,delly,cnvkit > ${group}.merged.vcf
+		aggregate_cnv2_vcf.pl --vcfs ${group}.merged.vcf,$meltvcf \\
+			--tumor-id ${id_c[tumor_idx_c]} \\
+			--normal-id ${id_c[normal_idx_c]} \\
+			--paired paired \\
+			--sample-order ${id_c[tumor_idx_c]},${id_c[normal_idx_c]} > ${group}.cnvs.agg.vcf
+		"""
+	}
+	else {
+		tmp = mantavcf.collect {it + ':manta ' } + dellyvcf.collect {it + ':delly ' } + cnvkitvcf.collect {it + ':cnvkit ' }
+		vcfs = tmp.join(' ')
+		"""
+		set +eu
+		source activate py3-env
+		svdb --merge --vcf $vcfs --no_intra --pass_only --bnd_distance 2500 --overlap 0.7 --priority manta,delly,cnvkit > ${group}.merged.vcf
+		aggregate_cnv2_vcf.pl --vcfs ${group}.merged.vcf,$meltvcf --paired no > ${group}.cnvs.agg.vcf
+		"""
+		
+	}
+
+}
+
 process aggregate_vcfs {
 	cpus 1
 	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
@@ -663,7 +852,8 @@ process aggregate_vcfs {
 
 	input:
 		set group, vc, file(vcfs) from concatenated_vcfs.mix(vcf_pindel).groupTuple()
-		set g, id, type from meta_aggregate.groupTuple()
+		set g, id, type, tissue from meta_aggregate.groupTuple()
+		file(cnvs) from cnvs.ifEmpty("nocnvs")
 
 	output:
 		set group, file("${group}.agg.vcf") into vcf_pon, vcf_done
@@ -675,10 +865,18 @@ process aggregate_vcfs {
 			normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
 			sample_order = id[tumor_idx]+","+id[normal_idx]
 		}
+		if (params.assay == 'myeloid') {
+			"""
+			aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
+			"""
+		}
+		else {
+			"""
+			aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.tmp.vcf
+			vcf-concat ${group}.agg.tmp.vcf $cnvs | vcf-sort -c > ${group}.agg.vcf
+			"""
+		}
 
-		"""
-		aggregate_vcf.pl --vcf ${vcfs.sort(false) { a, b -> a.getBaseName() <=> b.getBaseName() }.join(",")} --sample-order ${sample_order} |vcf-sort -c > ${group}.agg.vcf
-		"""
 }
 
 process pon_filter {
@@ -686,25 +884,34 @@ process pon_filter {
 	cpus 1
 	time '1h'
 	tag "$group"
+	memory '32 GB'
 
 	input:
 		set group, file(vcf) from vcf_pon
-		set g, id, type from meta_pon.groupTuple()
+		set g, id, type, tissue from meta_pon.groupTuple()
 
 	output:
 		set group, file("${group}.agg.pon.vcf") into vcf_vep
 
 	script:
-		def pons = []
-		if( params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
-		if( params.vardict )   { pons.push("vardict="+params.PON_vardict) }
-		if( params.tnscope )   { pons.push("tnscope="+params.PON_tnscope) }
-		def pons_str = pons.join(",")
-		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
+	if (params.assay == 'myeloid') {
+			def pons = []
+			if( params.freebayes ) { pons.push("freebayes="+params.PON_freebayes) }
+			if( params.vardict )   { pons.push("vardict="+params.PON_vardict) }
+			if( params.tnscope )   { pons.push("tnscope="+params.PON_tnscope) }
+			def pons_str = pons.join(",")
+			tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 
-	"""
-	filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
-	"""
+		"""
+		filter_with_pon.pl --vcf $vcf --pons $pons_str --tumor-id ${id[tumor_idx]} > ${group}.agg.pon.vcf
+		"""
+	}
+	// werid placement, no PON for PARP_inhib, Adds enigma-db to vcf. Move to separate process?
+	else if (params.assay == 'PARP_inhib') {
+		"""
+		vcfanno_linux64 -lua /fs1/resources/ref/hg19/bed/scout/sv_tracks/silly.lua $params.vcfanno $vcf > ${group}.agg.pon.vcf
+		"""
+	}
 }
 
 process annotate_vep {
@@ -741,7 +948,7 @@ process mark_germlines {
 
 	input:
 		set group, file(vcf) from vcf_germline
-		set g, id, type from meta_germline.groupTuple()
+		set g, id, type, tissue from meta_germline.groupTuple()
 
 	output:
 		set group, file("${group}.agg.pon.vep.markgerm.vcf") into vcf_umi
@@ -819,8 +1026,9 @@ process coyote {
 	input:
 		set group, file(vcf) from vcf_coyote
 		set g, type, lims_id, pool_id from meta_coyote.groupTuple()
-		set g2, cnv_type, file(cnvplot) from cnvplot_coyote.groupTuple()
+		set g2, id, cnv_type, file(cnvplot), tissue_c from cnvplot_coyote.join(meta_cnvplot, by:[0,1,2]).groupTuple()
 		set g3, lowcov_type, file(lowcov) from lowcov_coyote.groupTuple()
+
 
 	output:
 		file("${group}.coyote")
@@ -831,157 +1039,22 @@ process coyote {
 	script:
 		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
 		tumor_idx_cnv = cnv_type.findIndexOf{ it == 'tumor' || it == 'T' }
+		normal_idx_cnv = cnv_type.findIndexOf{ it == 'normal' || it == 'N' }
+		cnv_index = tumor_idx_cnv
+		if (params.assay == 'myeloid') {
+			cnv_index = tumor_idx_cnv
+		}
+		else if (tissue_c[tumor_idx_cnv] == 'ffpe' || 'FFPE') {
+			cnv_index = normal_idx_cnv
+		}
 		tumor_idx_lowcov = lowcov_type.findIndexOf{ it == 'tumor' || it == 'T' }
 
 	"""
-	echo "import_myeloid_to_coyote_vep_gms.pl \\
-		--group $params.coyote_group \\
-		--vcf /access/myeloid/vcf/${vcf} --id ${group}-${mode} \\
-		--cnv /access/myeloid/plots/${cnvplot[tumor_idx_cnv]} \\
-		--lowcov /access/myeloid/QC/${lowcov[tumor_idx_lowcov]} \\
-		--clarity-sample-id ${lims_id[tumor_idx]} --clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
+	echo "import_myeloid_to_coyote_vep_gms.pl --group $params.coyote_group \\
+		--vcf /access/${params.assay}/vcf/${vcf} --id ${group} \\
+		--cnv /access/${params.assay}/plots/${cnvplot[cnv_index]} \\
+		--clarity-sample-id ${lims_id[tumor_idx]} \\
+		--lowcov /access/${params.assay}/QC/${lowcov[tumor_idx_lowcov]} \\
+		--clarity-pool-id ${pool_id[tumor_idx]}" > ${group}.coyote
 	"""
 }
-
-
-process varlo_merge_prepro{
-	cpus 5
-	time '5h'
-	tag "$group"
-
-	when:
-		params.varlo
-
-
-	output:
-		file("CandidateVariants.vcf") into candidate
-
-	"""
-	source activate py3-env
-	python3 /fs1/viktor/nextflow_ovarian/bin/merge_for_varlociraptor.py --callers 'vardict,tnscope,freebayes' --dir $params.vcfs_path --output CandidateVariants.vcf
-	"""
-	}
-
-process split_candidates {
-	cpus 1
-	time '20m'
-	tag "$group"
-
-	input:
-		file(vcf) from candidate
-
-	output:
-		file("*.parts") into candidate_parts
-
-	'''
-	grep -v '^#' CandidateVariants.vcf | split -l 1000 - --filter='sh -c "{ grep ^# CandidateVariants.vcf; cat; } > $FILE.parts"'
-	'''
-
-}
-
-process preprocess {
-	cpus 1
-	time '20m'
-	tag "$id"
-
-	input:
-		set group, id, type, file(bam), file(bais), file(bqsr) from bam_varli
-		each file(part) from candidate_parts
-
-	output:
-		set group, id, type, file("${id}.${type}.observations.${part}.sort.bcf.gz"), file("${id}.${type}.observations.${part}.sort.bcf.gz.csi") into vcfparts_varlo
-
-	"""
-	source activate py3-env
-    varlociraptor preprocess variants $genome_file --bam ${bam} --output ${id}.${type}.observations.${part}.bcf < $part
-	bcftools sort ${id}.${type}.observations.${part}.bcf > ${id}.${type}.observations.${part}.sort.bcf
-	bgzip ${id}.${type}.observations.${part}.sort.bcf
-	bcftools index ${id}.${type}.observations.${part}.sort.bcf.gz
-	"""
-
-}
-
-
-process concatenate_vcfs_varlo {
-	cpus 1
-	publishDir "${OUTDIR}/vcf", mode: 'copy', overwrite: true
-	time '20m'    
-	tag "$id"
-
-	input:
-		set group, id, type, file(vcfs), file(csis) from vcfparts_varlo.groupTuple(by:[0,1,2])
-
-	output:
-		set group, id, type, file("${id}_${type}.concat.bcf") into varlo_call_vcf
-
-	"""
-	bcftools concat -a $vcfs > tmp.merged.bcf
-	bcftools sort tmp.merged.bcf -O u > ${id}_${type}.concat.bcf
-	"""
-}
-
-
-
-process varloci_calling {
-	cpus 1
-	time '3h' 
-	publishDir "$OUTDIR/vcf", mode :'copy'
-	tag "$group"
-
-	input:
-		set group, id, type, file(bcfs) from varlo_call_vcf.groupTuple()
-
-	output:
-		set group, val(id), file("${group}.varloci.calls.bcf") into calls_bcf, calls_bcf2
-
-	script:
-		tumor_idx = type.findIndexOf{ it == 'tumor' || it == 'T' }
-		normal_idx = type.findIndexOf{ it == 'normal' || it == 'N' }
-	
-		if (mode == 'paired') {
-			"""
-			source activate py3-env
-			varlociraptor call variants tumor-normal --purity 0.50 --tumor ${bcfs[tumor_idx]} --normal ${bcfs[normal_idx]} > ${group}.varloci.calls.bcf
-			"""
-		}
-		else {
-			"""
-			source activate py3-env
-			varlociraptor call variants generic --scenario scenario.yaml --obs tumor=$bcfs > ${group}.varloci.calls.bcf
-			"""
-		}
-}
-
-// process  FDR_filtering {
-
-// 	publishDir "$OUTDIR/vcf", mode :'copy'
-// 	tag "${smpl_id}"
-	 
-// 	when:
-// 		params.fdr
-// 	input:
-// 		set group, val(id), file(calls_file) from calls_bcf
-// 	output:
-// 		set val(smpl_id), file ("${smpl_id}.calls.fdrFilter.bcf") into callsfiltered
-// 	script:
-// 	"""
-// 	varlociraptor filter-calls control-fdr ${calls_file} --events SOMATIC_TUMOR --fdr 0.05 --var SNV > ${smpl_id}.calls.fdrFilter.bcf
-// 	"""
-// 	}
-
-// process posteriorOdds_filtering {
-// 	publishDir "$OUTDIR/vcf", mode :'copy'
-// 	tag "${smpl_id}"
-	
-// 	when:
-// 		params.posteriorOdds
-		
-// 	input:
-//                 set val(smpl_id), file(calls_file) from calls_bcf2
-// 	output:
-//                 set val(smpl_id), file ("${smpl_id}.calls.posteriorFilter.bcf") into callsfiltered_post
-//     script:
-// 	"""
-// 	varlociraptor filter-calls posterior-odds --events SOMATIC_TUMOR --odds strong < ${calls_file} > ${smpl_id}.calls.posteriorFilter.bcf  
-// 	"""
-// 	 }

@@ -12,3 +12,7 @@ scp $DIR/configs/nextflow.hopper.config $DEST_HOST:$PIPELINE_DEST/nextflow.confi
 
 # Copy other files
 scp -r $DIR/bin $DEST_HOST:$PIPELINE_DEST
+
+scp $DIR/scenario.yaml $DEST_HOST:/fs1/resources/ref/hg38/annotation_dbs/varlociraptor/scenario_ffpe.yaml
+git rev-parse HEAD > git.hash
+scp $DIR/git.hash $DEST_HOST:$PIPELINE_DEST
