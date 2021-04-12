@@ -1,5 +1,9 @@
 ## Changelog ##
 
+### v1.1.1
+#### qc values
+- merged with qc_sention from nextflow_wgs which added pf error and missmatch error rates to qc-json
+
 2020-07-10
 Merged master with ovarian:
 # queue set to high

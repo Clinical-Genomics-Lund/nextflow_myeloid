@@ -1,11 +1,10 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl -w
 use strict;
-use warnings;
 use Data::Dumper;
 use JSON;# qw( encode_json );
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# General QC-script for sentieon-data. Takes two arguments: SAMPLE-ID, TYPE(panel or wgs or umi)
+# General QC-script for sentieon-data. Takes two arguments: SAMPLE-ID, TYPE(panel or wgs)
 # PANEL: Requires the following algos from sentieon qc:
 #        --algo MeanQualityByCycle mq_metrics.txt \\
 #        --algo QualDistribution qd_metrics.txt \\
@@ -14,7 +13,6 @@ use JSON;# qw( encode_json );
 #        --algo InsertSizeMetricAlgo is_metrics.txt \\
 #        --algo HsMetricAlgo --targets_list $target_intervals --baits_list $target_intervals hs_metrics.txt \\
 #        --algo CoverageMetrics --cov_thresh 1 --cov_thresh 10 --cov_thresh 30 --cov_thresh 100 --cov_thresh 250 --cov_thresh 500 cov_metrics.txt
-# UMI: same as above, does not require dedupmetrics from locus_collector + dedup
 # WGS: Requires the following algos from sentieon qc
 #       --algo MeanQualityByCycle mq_metrics.txt \\
 #        --algo QualDistribution qd_metrics.txt \\
@@ -34,7 +32,7 @@ my $type = $ARGV[1];
 my %pct_above_x;
 my $median;
 my $pct_above_panel;
-if ($type eq "panel" || $type eq "umi" ) {
+if ($type eq "panel") {
 
     ($pct_above_panel, $median) = coverage_calc();
     %pct_above_x = %$pct_above_panel;
@@ -44,13 +42,16 @@ if ($type eq "panel" || $type eq "umi" ) {
 my $align_metrics_file = "aln_metrics.txt";
 my $insert_file = "is_metrics.txt";
 my $dedup_metrics_file = "dedup_metrics.txt";
-
 my %results;
 my $metrics_file;
+my $gcsummary_file;
+
 if ($type eq "wgs") {
     $metrics_file = "wgs_metrics.txt";
+    my ( $sum, %quartiles, $pct25_obs, $pct50_obs, $pct75_obs );
     open( HS, $metrics_file );
     while( <HS> ) {
+  
         if( /^\#SentieonCommandLine/ ) {
 	    <HS>;
             my $vals = <HS>;
@@ -58,6 +59,9 @@ if ($type eq "wgs") {
             $results{'median_cov'} = $a[3];
             $results{'sd_coverage'} = $a[2];
             $results{'mean_coverage'} = $a[1];
+            $pct25_obs = ( $a[0] + 1 ) / 4; # get observations from different quartiles
+            $pct50_obs = ( $a[0] + 1 ) / 2; # get observations from different quartiles
+            $pct75_obs = ( ( $a[0] + 1 ) * 3 ) / 4; # get observations from different quartiles
             $pct_above_x{'1'} = $a[12];
             $pct_above_x{'5'} = $a[13];
             $pct_above_x{'10'} = $a[14];
@@ -73,12 +77,37 @@ if ($type eq "wgs") {
             $pct_above_x{'90'} = $a[24];
             $pct_above_x{'100'} = $a[25];
 
-	    }
+	}elsif( /^(\d+)\s+(\d+)/ ){
+            $sum += $2;
+            if( $sum >= $pct25_obs and not $quartiles{ 'R_25' } ){
+                $quartiles{ 'R_25' } = $1;
+            }
+            if( $sum >= $pct50_obs and not $quartiles{ 'R_50' } ){
+                $quartiles{ 'R_50' } = $1;
+            }
+            if( $sum >= $pct75_obs and not $quartiles{ 'R_75' } ){
+                $quartiles{ 'R_75' } = $1;
+            }
+        }
     }
     close HS;
+    $results{'iqr'} = ( $quartiles{ 'R_75' } - $quartiles{ 'R_25' } );
+
+    $gcsummary_file = "gc_summary.txt";
+    open( GC, $gcsummary_file );
+    while( <GC> ) {
+        if( /^\#SentieonCommandLine/ ) {
+	    <GC>;
+            my $vals = <GC>;
+            my @a = split /\t/, $vals;
+            $results{'at_drop'} = $a[5];
+            $results{'gc_drop'} = $a[6];
+        }
+    }
+    close GC;
 
 }
-elsif ($type eq "panel" || $type eq "umi") {
+elsif ($type eq "panel") {
     $metrics_file = "hs_metrics.txt";
     open( HS, $metrics_file );
     while( <HS> ) {
@@ -124,26 +153,38 @@ close INS;
 
 ## DEDUP ##
 
-if ( $type ne "umi") {
-    open( DEDUP, $dedup_metrics_file );
-    while( <DEDUP> ) {
-        if( /^\#SentieonCommandLine/ ) {
-            <DEDUP>;
-            my $vals = <DEDUP>;
-            my @a = split /\t/, $vals;
-            $results{'dup_reads'} = $a[6];
-            #print "dup_reads: $a[6]\n";
-            $results{'num_reads'} = $a[2];
-            #print "num_reads: $a[2]\n";
-            $results{'dup_pct'} = $a[8];
-            #print "dup_pct: $a[8]\n";
-            my $mapped = $a[2]-$a[4];
-            $results{'mapped_reads'} = $mapped;
-            #print "mapped_reads: $mapped\n";
-        }
-    }
-    close DEDUP;
+open( DEDUP, $dedup_metrics_file );
+while( <DEDUP> ) {
+    if( /^\#SentieonCommandLine/ ) {
+	    <DEDUP>;
+	    my $vals = <DEDUP>;
+	    my @a = split /\t/, $vals;
+	    $results{'dup_reads'} = $a[6];
+        #print "dup_reads: $a[6]\n";
+	    $results{'num_reads'} = $a[2];
+        #print "num_reads: $a[2]\n";
+        $results{'dup_pct'} = $a[8];
+        #print "dup_pct: $a[8]\n";
+        my $mapped = $a[2]-$a[4];
+        $results{'mapped_reads'} = $mapped;
+        #print "mapped_reads: $mapped\n";
+	}
 }
+close DEDUP;
+
+## ALIGMENTMETRICS ##
+
+open( ALIGN, $align_metrics_file );
+while( <ALIGN> ) {
+    if( /^\#SentieonCommandLine/ ) {
+	    <ALIGN>;
+	    my $vals = <ALIGN>;
+	    my @a = split /\t/, $vals;
+	    $results{'pf_missmatch_rate'} = $a[12];
+	    $results{'pf_error_rate'} = $a[13];
+	}
+}
+close ALIGN;
 
 sub coverage_calc {
 
